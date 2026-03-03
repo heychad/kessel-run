@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
 # Kessel Run — autonomous loop for Claude Code.
-# Fresh context every cycle. Stream everything. Never capture into variables.
+# Fresh context every parsec. Stream everything. Never capture into variables.
 #
 # Usage:
-#   ./scripts/kessel-run/loop.sh              # run max cycles (default 12)
-#   ./scripts/kessel-run/loop.sh 5            # run 5 cycles
-#   ./scripts/kessel-run/loop.sh 0            # unlimited cycles
-#   ./scripts/kessel-run/loop.sh watch        # single cycle in TUI mode
+#   ./scripts/kessel-run/loop.sh              # run max parsecs (default 12)
+#   ./scripts/kessel-run/loop.sh 5            # run 5 parsecs
+#   ./scripts/kessel-run/loop.sh 0            # unlimited parsecs
+#   ./scripts/kessel-run/loop.sh watch        # single parsec in TUI mode
 set -euo pipefail
 
 KESSEL_MODEL="${KESSEL_MODEL:-claude-opus-4-6}"
 KESSEL_DIR="${KESSEL_DIR:-scripts/kessel-run}"
 
-# ── ANSI Colors (blue/purple space palette) ──────────────────────
-BLUE='\033[38;5;69m'
-PURPLE='\033[38;5;141m'
-CYAN='\033[38;5;117m'
-DIM='\033[38;5;240m'
+# ── ANSI Colors (Star Wars palette) ─────────────────────────────
+YELLOW='\033[38;5;220m'
 WHITE='\033[1;37m'
+DIM='\033[38;5;240m'
 GREEN='\033[38;5;114m'
 RED='\033[38;5;203m'
 RESET='\033[0m'
 BOLD='\033[1m'
+
+# ── Cleanup ──────────────────────────────────────────────────────
+cleanup() {
+    [ -n "${TIMER_PID:-}" ] && kill "$TIMER_PID" 2>/dev/null
+    printf '\033]0;\007'
+}
+trap cleanup EXIT
 
 # ── Helpers ──────────────────────────────────────────────────────
 format_duration() {
@@ -67,30 +72,50 @@ show_progress() {
     for ((i=0; i<filled; i++)); do filled_str+="█"; done
     for ((i=0; i<empty; i++)); do empty_str+="░"; done
 
-    printf "  ${PURPLE}%s${CYAN}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${CYAN}%d%%${RESET}\n" \
+    printf "  ${YELLOW}%s${WHITE}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${YELLOW}%d%%${RESET}\n" \
         "$filled_str" "$empty_str" "$passing" "$total" "$pct"
 }
 
-show_cycle_header() {
-    local cycle=$1 prev_dur=$2 total_dur=$3
+show_parsec_header() {
+    local parsec=$1 prev_dur=$2 total_dur=$3
     local time_now
     time_now=$(date '+%H:%M:%S')
 
     echo ""
-    if [ "$cycle" -gt 1 ]; then
-        printf "  ${BLUE}━━━ ${CYAN}${BOLD}CYCLE %d${RESET} ${BLUE}━━━${RESET}  ${DIM}%s  last ${WHITE}%s${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
-            "$cycle" "$time_now" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
+    if [ "$parsec" -gt 1 ]; then
+        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}  ${DIM}%s  last ${WHITE}%s${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
+            "$parsec" "$time_now" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
     else
-        printf "  ${BLUE}━━━ ${CYAN}${BOLD}CYCLE %d${RESET} ${BLUE}━━━${RESET}  ${DIM}%s${RESET}\n" "$cycle" "$time_now"
+        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}  ${DIM}%s${RESET}\n" "$parsec" "$time_now"
     fi
     show_progress
     echo ""
 }
 
-# ── Hero banner ──────────────────────────────────────────────────
-printf "${BLUE}"
-cat << 'HERO'
+start_timer() {
+    local parsec=$1 start=$2
+    while true; do
+        local now=$(date +%s)
+        local elapsed=$((now - start))
+        printf '\033]0;Kessel Run — Parsec %d — %s\007' "$parsec" "$(format_duration $elapsed)"
+        sleep 1
+    done
+}
 
+# ── Hero banner (Falcon left, title right) ───────────────────────
+print_hero() {
+    local line_num=0
+    echo ""
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+        case $line_num in
+            6)  printf "  ${YELLOW}%-42s${RESET}  ${YELLOW}${BOLD}K E S S E L${RESET}\n" "$line" ;;
+            7)  printf "  ${YELLOW}%-42s${RESET}     ${YELLOW}${BOLD}R U N${RESET}\n" "$line" ;;
+            9)  printf "  ${YELLOW}%-42s${RESET}  ${DIM}Autonomous loop${RESET}\n" "$line" ;;
+            10) printf "  ${YELLOW}%-42s${RESET}  ${DIM}for Claude Code${RESET}\n" "$line" ;;
+            *)  printf "  ${YELLOW}%s${RESET}\n" "$line" ;;
+        esac
+    done << 'FALCON'
                  _     _
                 /_|   |_\
                //||   ||\\
@@ -111,10 +136,11 @@ cat << 'HERO'
         `.     /         \     .'
           `.  /._________.\  .'
             `--._________.--'
-HERO
-printf "${RESET}\n"
-printf "  ${CYAN}${BOLD}K E S S E L   R U N${RESET}\n"
-printf "  ${DIM}Autonomous loop for Claude Code${RESET}\n\n"
+FALCON
+    echo ""
+}
+
+print_hero
 
 # ── Pre-flight checks ───────────────────────────────────────────
 PREFLIGHT_OK=true
@@ -141,23 +167,23 @@ echo ""
 
 # ── Watch mode ───────────────────────────────────────────────────
 if [ "${1:-}" = "watch" ]; then
-    printf "  ${CYAN}━━━ WATCH MODE ━━━ single cycle in TUI${RESET}\n\n"
+    printf "  ${YELLOW}━━━ WATCH MODE ━━━${RESET} ${DIM}single parsec in TUI${RESET}\n\n"
     cat "${KESSEL_DIR}/PROMPT.md" | claude \
         --model "$KESSEL_MODEL" \
         --dangerously-skip-permissions \
         --verbose
     echo ""
-    printf "  ${CYAN}━━━ WATCH COMPLETE ━━━${RESET}\n"
+    printf "  ${YELLOW}━━━ WATCH COMPLETE ━━━${RESET}\n"
     exit 0
 fi
 
 # ── Timing ───────────────────────────────────────────────────────
-MAX_CYCLES="${1:-${KESSEL_MAX_PARSECS:-12}}"
-CYCLE=0
+MAX_PARSECS="${1:-${KESSEL_MAX_PARSECS:-12}}"
+PARSEC=0
 TOTAL_START=$(date +%s)
 PREV_DURATION=0
 
-printf "  ${DIM}Max cycles:${RESET} ${WHITE}%s${RESET} ${DIM}(0 = unlimited)${RESET}\n" "$MAX_CYCLES"
+printf "  ${DIM}Max parsecs:${RESET} ${WHITE}%s${RESET} ${DIM}(0 = unlimited)${RESET}\n" "$MAX_PARSECS"
 show_progress
 echo ""
 
@@ -176,21 +202,25 @@ sys.exit(0 if all(i.get('passes') for i in items) else 1)
 
 # ── Main loop ────────────────────────────────────────────────────
 while true; do
-    CYCLE=$((CYCLE + 1))
+    PARSEC=$((PARSEC + 1))
     CYCLE_START=$(date +%s)
 
-    if [ "$MAX_CYCLES" -gt 0 ] && [ "$CYCLE" -gt "$MAX_CYCLES" ]; then
+    if [ "$MAX_PARSECS" -gt 0 ] && [ "$PARSEC" -gt "$MAX_PARSECS" ]; then
         TOTAL_END=$(date +%s)
         echo ""
-        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
-        printf "  ${CYAN}${BOLD}MAX CYCLES (%d) REACHED${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" "$MAX_CYCLES" "$(format_duration $((TOTAL_END - TOTAL_START)))"
+        printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        printf "  ${WHITE}${BOLD}MAX PARSECS (%d) REACHED${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" "$MAX_PARSECS" "$(format_duration $((TOTAL_END - TOTAL_START)))"
         show_progress
-        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
         break
     fi
 
     TOTAL_NOW=$(date +%s)
-    show_cycle_header "$CYCLE" "$PREV_DURATION" "$((TOTAL_NOW - TOTAL_START))"
+    show_parsec_header "$PARSEC" "$PREV_DURATION" "$((TOTAL_NOW - TOTAL_START))"
+
+    # Live timer in terminal title bar
+    start_timer "$PARSEC" "$CYCLE_START" &
+    TIMER_PID=$!
 
     # Stream output directly — never capture into variables
     cat "${KESSEL_DIR}/PROMPT.md" | claude -p \
@@ -199,21 +229,26 @@ while true; do
         --output-format=text \
         --verbose 2>&1 || true
 
+    # Stop timer
+    kill "$TIMER_PID" 2>/dev/null || true
+    wait "$TIMER_PID" 2>/dev/null || true
+    TIMER_PID=""
+
     CYCLE_END=$(date +%s)
     PREV_DURATION=$((CYCLE_END - CYCLE_START))
 
     echo ""
-    printf "  ${DIM}── cycle %d done ── %s ──${RESET}\n" "$CYCLE" "$(format_duration $PREV_DURATION)"
+    printf "  ${DIM}── parsec %d done ── %s ──${RESET}\n" "$PARSEC" "$(format_duration $PREV_DURATION)"
 
     # Check if all PRD items pass
     if check_all_complete; then
         TOTAL_END=$(date +%s)
         echo ""
-        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
-        printf "  ${CYAN}${BOLD}  ✦  A L L   I T E M S   P A S S I N G  ✦${RESET}\n"
-        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        printf "  ${WHITE}${BOLD}  ✦  A L L   I T E M S   P A S S I N G  ✦${RESET}\n"
+        printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
         echo ""
-        printf "  ${WHITE}Cycles:${RESET} %d    ${WHITE}Time:${RESET} %s\n" "$CYCLE" "$(format_duration $((TOTAL_END - TOTAL_START)))"
+        printf "  ${WHITE}Parsecs:${RESET} %d    ${WHITE}Time:${RESET} %s\n" "$PARSEC" "$(format_duration $((TOTAL_END - TOTAL_START)))"
         show_progress
         echo ""
         printf "  ${DIM}\"Great shot kid, that was one in a million!\"${RESET}\n"
@@ -221,7 +256,7 @@ while true; do
 
         # macOS notification
         if command -v osascript &>/dev/null; then
-            osascript -e "display notification \"All PRD items passing after ${CYCLE} cycles.\" with title \"Kessel Run Complete\" sound name \"Glass\""
+            osascript -e "display notification \"All PRD items passing after ${PARSEC} parsecs.\" with title \"Kessel Run Complete\" sound name \"Glass\""
         fi
         break
     fi
