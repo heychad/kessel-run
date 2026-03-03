@@ -1,26 +1,96 @@
 #!/usr/bin/env bash
-# The Hyperdrive — core Kessel Run loop.
-# Fresh context every parsec. Stream everything. Never capture into variables.
+# Kessel Run — autonomous loop for Claude Code.
+# Fresh context every cycle. Stream everything. Never capture into variables.
 #
 # Usage:
-#   ./scripts/kessel-run/loop.sh              # run KESSEL_MAX_PARSECS (default 12)
-#   ./scripts/kessel-run/loop.sh 5            # run 5 parsecs
-#   ./scripts/kessel-run/loop.sh 0            # unlimited parsecs
-#   ./scripts/kessel-run/loop.sh watch        # single TUI iteration (no -p flag)
+#   ./scripts/kessel-run/loop.sh              # run max cycles (default 12)
+#   ./scripts/kessel-run/loop.sh 5            # run 5 cycles
+#   ./scripts/kessel-run/loop.sh 0            # unlimited cycles
+#   ./scripts/kessel-run/loop.sh watch        # single cycle in TUI mode
 set -euo pipefail
 
 KESSEL_MODEL="${KESSEL_MODEL:-claude-opus-4-6}"
 KESSEL_DIR="${KESSEL_DIR:-scripts/kessel-run}"
 
-# ── Parsec banners — one per iteration ────────────────────────────
-# Art from ascii-art.de Star Wars collection by Lennert Stock et al.
-parsec_banner() {
-    local n=$(( ($1 - 1) % 11 ))
+# ── ANSI Colors (blue/purple space palette) ──────────────────────
+BLUE='\033[38;5;69m'
+PURPLE='\033[38;5;141m'
+CYAN='\033[38;5;117m'
+DIM='\033[38;5;240m'
+WHITE='\033[1;37m'
+GREEN='\033[38;5;114m'
+RED='\033[38;5;203m'
+RESET='\033[0m'
+BOLD='\033[1m'
+
+# ── Helpers ──────────────────────────────────────────────────────
+format_duration() {
+    local secs=$1
+    if [ "$secs" -lt 60 ]; then
+        echo "${secs}s"
+    elif [ "$secs" -lt 3600 ]; then
+        echo "$((secs / 60))m $((secs % 60))s"
+    else
+        echo "$((secs / 3600))h $((secs % 3600 / 60))m"
+    fi
+}
+
+count_prd_progress() {
+    python3 -c "
+import json, sys
+with open('docs/specs/PRD.json') as f:
+    data = json.load(f)
+items = data.get('items', [])
+total = len(items)
+passing = sum(1 for i in items if i.get('passes'))
+print(f'{passing} {total}')
+" 2>/dev/null || echo "0 0"
+}
+
+show_progress() {
+    local progress passing total pct filled empty i filled_str empty_str
+    progress=$(count_prd_progress)
+    passing=$(echo "$progress" | cut -d' ' -f1)
+    total=$(echo "$progress" | cut -d' ' -f2)
+
+    if [ "$total" -eq 0 ]; then
+        printf "  ${DIM}No PRD items found${RESET}\n"
+        return
+    fi
+
+    pct=$(( passing * 100 / total ))
+    local bar_width=30
+    filled=$(( passing * bar_width / total ))
+    empty=$(( bar_width - filled ))
+
+    filled_str="" ; empty_str=""
+    for ((i=0; i<filled; i++)); do filled_str+="█"; done
+    for ((i=0; i<empty; i++)); do empty_str+="░"; done
+
+    printf "  ${PURPLE}%s${CYAN}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${CYAN}%d%%${RESET}\n" \
+        "$filled_str" "$empty_str" "$passing" "$total" "$pct"
+}
+
+show_cycle_header() {
+    local cycle=$1 prev_dur=$2 total_dur=$3
+    local time_now
+    time_now=$(date '+%H:%M:%S')
+
     echo ""
-    case $n in
-    0)
-# ── Millennium Falcon ──
-cat << 'ART'
+    if [ "$cycle" -gt 1 ]; then
+        printf "  ${BLUE}━━━ ${CYAN}${BOLD}CYCLE %d${RESET} ${BLUE}━━━${RESET}  ${DIM}%s  last ${WHITE}%s${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
+            "$cycle" "$time_now" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
+    else
+        printf "  ${BLUE}━━━ ${CYAN}${BOLD}CYCLE %d${RESET} ${BLUE}━━━${RESET}  ${DIM}%s${RESET}\n" "$cycle" "$time_now"
+    fi
+    show_progress
+    echo ""
+}
+
+# ── Hero banner ──────────────────────────────────────────────────
+printf "${BLUE}"
+cat << 'HERO'
+
                  _     _
                 /_|   |_\
                //||   ||\\
@@ -33,326 +103,69 @@ cat << 'ART'
         .~  `=='\ |   | /   _.-'.  |
        /  /      \|   |/ .-~    _.-'
       |           +---+  \  _.-~  |
-      `=----.____/  #  \____.----='       PARSEC #XX
-       [::::::::|  (_)  |::::::::]        ═══════════
-      .=----~~~~~\     /~~~~~----=.
-      |          /`---'\          |        "She may not look like much, but
-       \  \     /       \     /  /         she's got it where it counts."
-        `.     /         \     .'
-          `.  /._________.\  .'
-            `--._________.--'
-ART
-    ;;
-    1)
-# ── TIE Fighter ──
-cat << 'ART'
-      _______              _______
-     /\:::::/\            /\:::::/\
-    /::\:::/::\          /==\:::/::\
-   /::::\_/::::\   .--. /====\_/::::\
-  /_____/ \_____\-' .-.`-----' \_____\
-  \:::::\_/:::::/-. `-'.-----._/:::::/
-   \::::/:\::::/   `--' \::::/:\::::/
-    \::/:::\::/          \::/:::\::/
-     \/:::::\/            \/:::::\/
-      """""""              """""""
-
-    PARSEC #XX  //  "I have you now."
-ART
-    ;;
-    2)
-# ── X-wing (attack position) ──
-cat << 'ART'
-          .                            .                      .
-  .                  .             -)------+====+       .
-                           -)----====    ,'   ,'   .                 .
-              .                  `.  `.,;___,'                .
-                                   `, |____l_\
-                    _,.....------c==]""______ |,,,,,,.....____ _
-    .      .       "-:______________  |____l_|]'''''''''''       .     .
-                                  ,'"",'.   `.
-         .                 -)-----====   `.   `.
-                     .            -)-------+====+       .            .
-             .                               .
-
-    PARSEC #XX  //  "Almost there... almost there..."
-ART
-    ;;
-    3)
-# ── Imperial Star Destroyer ──
-cat << 'ART'
-           .            .                     .
-                  _        .                          .            (
-                 (_)        .       .                                     .
-  .        ____.--^.
-   .      /:  /    |                               +           .         .
-         /:  `--=--'   .                                                .
-        /: __[\==`-.___          *           .
-       /__|\ _~~~~~~   ~~--..__            .             .
-       \   \|::::|-----.....___|~--.                                 .
-        \ _\_~~~~~-----:|:::______//---...___
-    .   [\  \  __  --     \       ~  \_      ~~~===------==-...____
-        [============================================================-
-        /         __/__   --  /__    --       /____....----''''~~~~      .
-  *    /  /   ==           ____....=---='''~~~~ .
-      /____....--=-''':~~~~                      .                .
-      .       ~--~
-                     .        PARSEC #XX  //  "Intensify forward firepower!"
-ART
-    ;;
-    4)
-# ── Death Star + Falcon ──
-cat << 'ART'
-            .          .
-  .          .                  .          .              .
-        +.           _____  .        .        + .                    .
-    .        .   ,-~"     "~-.                                +
-               ,^ ___         ^. +                  .    .       .
-              / .^   ^.         \         .      _ .
-             Y  l  o  !          Y  .         __CL\H--.
-     .       l_ `.___.'        _,[           L__/_\H' \\--_-          +
-             |^~"-----------""~ ^|       +    __L_(=): ]-_ _-- -
-   +       . !                   !     .     T__\ /H. //---- -       .
-          .   \                 /               ~^-H--'
-               ^.             .^            .      "       +.
-                 "-.._____.,-" .                    .
-
-    PARSEC #XX  //  "That's no moon."
-ART
-    ;;
-    5)
-# ── AT-AT Walker ──
-cat << 'ART'
-                 ________
-            _,.-Y  |  |  Y-._
-        .-~"   ||  |  |  |   "-.
-        I" ""=="|" !""! "|"[]""|     _____
-        L__  [] |..------|:   _[----I" .-{"-.
-       I___|  ..| l______|l_ [__L]_[I_/r(=}=-P
-      [L______L_[________]______j~  '-=c_]/=-^
-       \_I_j.--.\==I|I==_/.--L_]
-         [_((==)[`-----"](==)j
-            I--I"~~"""~~"I--I
-            |[]|         |[]|
-            l__j         l__j
-            |!!|         |!!|
-            |..|         |..|
-            ([])         ([])
-            ]--[         ]--[
-            [_L]         [_L]
-           /|..|\       /|..|\
-          `=}--{='     `=}--{='
-         .-^--r-^-.   .-^--r-^-.
-  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    PARSEC #XX  //  "Imperial walkers on the north ridge!"
-ART
-    ;;
-    6)
-# ── R2-D2 ──
-cat << 'ART'
-         _____
-       .'/L|__`.
-      / =[_]O|` \
-      |"+_____":|
-    __:='|____`-:__
-   ||[] ||====| []||
-   ||[] | |=| | []||
-   |:||_|=|U| |_||:|
-   |:|||]_=_ =[_||:|
-   | |||] [_][]C|| |
-   | ||-'"""""`-|| |
-   /|\\_\_|_|_/_//|\
-  |___|   /|\   |___|
-  `---'  |___|  `---'
-         `---'
-
-    PARSEC #XX  //  "Beep boop bweee!"
-ART
-    ;;
-    7)
-# ── X-wing (front view) ──
-cat << 'ART'
-     ________
-   =[________]========-------[]<--
-     |  ___ |
-     |==|  ||
-     |==| _| |
-     |==||   |
-     |  ||   |
-     |  ||    |
-     |  ~~    |
-     |________|
-   __L________\_
-  <_|_L___/   | |,
-     |__\_____|_|___
-    /L___________   `---._________
-   | | .----. _  |---v--.______ _ `-------------.--.__
-  [| | |    |(_) |]__[_____]____________________]__ __]
-   | |___________|---^--'_________.-------------`--'
-    \L______________.---'
-   __|__/_    | |
-  <_|_L___\___|_|'
-     L________/
-
-    PARSEC #XX  //  "Lock S-foils in attack position."
-ART
-    ;;
-    8)
-# ── Darth Vader ──
-cat << 'ART'
-           _.-'~~~~~~`-._
-          /      ||      \
-         /       ||       \
-        |        ||        |
-        | _______||_______ |
-        |/ ----- \/ ----- \|
-       /  (     )  (     )  \
-      / \  ----- () -----  / \
-     /   \      /||\      /   \
-    /     \    /||||\    /     \
-   /       \  /||||||\  /       \
-  /_        \o========o/        _\
-    `--...__|`-._  _.-'|__...--'
-            |    `'    |
-
-    PARSEC #XX  //  "I find your lack of faith disturbing."
-ART
-    ;;
-    9)
-# ── Yoda ──
-cat << 'ART'
-                   ____
-                _.' :  `._
-            .-'.'  :   .'`-.
-   __      / : ___\ ;  /___  ; \      __
- ,'_ ""--.:_;" .-.";: :".-.":_; .--"" _`,
- :' `.t""--.. '<@.`;_  ',@>` ..--""j.' `;
-      `:-.._J '-.-'L__ `-- ' L_..-;'
-        "-.__ ;  .-"  "-.  : __.-"
-            L ' /.------\ ' J
-             "-.   "--"   .-"
-            __.l"-:_JL_;-";.__
-         .-j/'.;  ;""""  / .'\'-.
-       .' /;`. "-.:     .-" .';  `.
-    .-"  / ;  "-. "-..-" .-"  :    "-.
- .+"-.  : :      "-.__.-"      ;-._   \
- ; \  `.; ;                    : : "+. ;
- :  ;   ; ;                    : ;  : \:
-
-    PARSEC #XX  //  "Do. Or do not. There is no try."
-ART
-    ;;
-    10)
-# ── Lambda Shuttle ──
-cat << 'ART'
-                 ___
-                /  |
-               /  =|
-              /   =`.
-             /      |
-            <_______|
-        __,.----'__`+
-       '------:_____]
-               _|_
-  ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-           o
-          /\           .
-         |  `.
-         `.   \                    .
-    .      |    `.
-           `.     |          .
-            |     |_.--.
-         .  `.   /<= .-'              .
-    .        |_./|_.'/))    .
-             /()_.-'/ /`-.
-            / / _.-'\/_   `-.__
-           (./())      ~~--..__~`-o
-      .     | /   .            `-'
-            //       .   .             .
-
-    PARSEC #XX  //  "Shuttle Tydirium, what is your cargo and destination?"
-ART
-    ;;
-    esac
-}
-
-# ── Hero banner — Millennium Falcon ───────────────────────────────
-cat << 'HERO'
-
-                 _     _                __  ___  _______     _______.     _______. _______  __
-                /_|   |_\              |  |/  / |   ____|   /       |    /       ||   ____||  |
-               //||   ||\\             |  '  /  |  |__     |   (----`   |   (----`|  |__   |  |
-              // ||   || \\            |    <   |   __|     \   \        \   \    |   __|  |  |
-             //  ||___||  \\           |  .  \  |  |____.----)   |   .----)   |   |  |____ |  `----.
-            /     |   |     \    _     |__|\__\ |_______|_______/    |_______/    |_______||_______|
-           /    __|   |__    \  /_\
-          / .--~  |   |  ~--. \|   |   .______       __    __  .__   __.
-         /.~ __\  |   |  /   ~.|   |   |   _  \     |  |  |  | |  \ |  |
-        .~  `=='\ |   | /   _.-'.  |   |  |_)  |    |  |  |  | |   \|  |
-       /  /      \|   |/ .-~    _.-'   |      /     |  |  |  | |  . `  |
-      |           +---+  \  _.-~  |    |  |\  \----.|  `--'  | |  |\   |
-      `=----.____/  #  \____.----='    | _| `._____| \______/  |__| \__|
+      `=----.____/  #  \____.----='
        [::::::::|  (_)  |::::::::]
-      .=----~~~~~\     /~~~~~----=.    The fastest hunk of junk in the galaxy.
+      .=----~~~~~\     /~~~~~----=.
       |          /`---'\          |
        \  \     /       \     /  /
         `.     /         \     .'
           `.  /._________.\  .'
             `--._________.--'
-
 HERO
+printf "${RESET}\n"
+printf "  ${CYAN}${BOLD}K E S S E L   R U N${RESET}\n"
+printf "  ${DIM}Autonomous loop for Claude Code${RESET}\n\n"
 
-# ── Pre-flight checks ─────────────────────────────────────────────
+# ── Pre-flight checks ───────────────────────────────────────────
 PREFLIGHT_OK=true
 
-for f in "${KESSEL_DIR}/PROMPT.md" specs/PRD.json "${KESSEL_DIR}/backpressure.sh" .claude/PROGRESS.md; do
+for f in "${KESSEL_DIR}/PROMPT.md" docs/specs/PRD.json "${KESSEL_DIR}/backpressure.sh" .claude/PROGRESS.md; do
     if [ ! -f "$f" ]; then
-        echo "  [FAIL] Missing: $f"
+        printf "  ${RED}✗${RESET} Missing: ${WHITE}%s${RESET}\n" "$f"
         PREFLIGHT_OK=false
     fi
 done
 
 if [ "$PREFLIGHT_OK" = false ]; then
     echo ""
-    echo "  Pre-flight check failed. Run init.sh first."
-    echo "  \"She may not look like much, but she's got it where it counts.\""
+    printf "  ${RED}Pre-flight failed.${RESET} Run ${WHITE}init.sh${RESET} first.\n"
     exit 1
 fi
 
-echo "  Pre-flight check ........... ALL GREEN"
-echo "  Navigation computer ........ ${KESSEL_DIR}/PROMPT.md"
-echo "  Star chart ................. specs/PRD.json"
-echo "  Deflector shields .......... ${KESSEL_DIR}/backpressure.sh"
-echo "  Progress log ............... .claude/PROGRESS.md"
-echo "  Hyperdrive ................. ${KESSEL_MODEL}"
+printf "  ${GREEN}✓${RESET} ${DIM}Prompt${RESET}       ${WHITE}${KESSEL_DIR}/PROMPT.md${RESET}\n"
+printf "  ${GREEN}✓${RESET} ${DIM}PRD${RESET}          ${WHITE}docs/specs/PRD.json${RESET}\n"
+printf "  ${GREEN}✓${RESET} ${DIM}Backpressure${RESET} ${WHITE}${KESSEL_DIR}/backpressure.sh${RESET}\n"
+printf "  ${GREEN}✓${RESET} ${DIM}Progress${RESET}     ${WHITE}.claude/PROGRESS.md${RESET}\n"
+printf "  ${GREEN}✓${RESET} ${DIM}Model${RESET}        ${WHITE}${KESSEL_MODEL}${RESET}\n"
 echo ""
 
-# ── Watch mode (single TUI iteration) ─────────────────────────────
+# ── Watch mode ───────────────────────────────────────────────────
 if [ "${1:-}" = "watch" ]; then
-    echo "  ── WATCH MODE ── Single parsec in TUI ──"
-    echo ""
+    printf "  ${CYAN}━━━ WATCH MODE ━━━ single cycle in TUI${RESET}\n\n"
     cat "${KESSEL_DIR}/PROMPT.md" | claude \
         --model "$KESSEL_MODEL" \
         --dangerously-skip-permissions \
         --verbose
     echo ""
-    echo "  ── WATCH MODE COMPLETE ──"
+    printf "  ${CYAN}━━━ WATCH COMPLETE ━━━${RESET}\n"
     exit 0
 fi
 
-# ── Parse parsec count ─────────────────────────────────────────────
-MAX_PARSECS="${1:-${KESSEL_MAX_PARSECS:-12}}"
-PARSEC=0
+# ── Timing ───────────────────────────────────────────────────────
+MAX_CYCLES="${1:-${KESSEL_MAX_PARSECS:-12}}"
+CYCLE=0
+TOTAL_START=$(date +%s)
+PREV_DURATION=0
 
-echo "  Plotting course: ${MAX_PARSECS} parsecs (0 = unlimited)"
+printf "  ${DIM}Max cycles:${RESET} ${WHITE}%s${RESET} ${DIM}(0 = unlimited)${RESET}\n" "$MAX_CYCLES"
+show_progress
 echo ""
 
-# ── Completion check ───────────────────────────────────────────────
+# ── Completion check ─────────────────────────────────────────────
 check_all_complete() {
     python3 -c "
 import json, sys
-with open('specs/PRD.json') as f:
+with open('docs/specs/PRD.json') as f:
     data = json.load(f)
 items = data.get('items', [])
 if not items:
@@ -361,23 +174,23 @@ sys.exit(0 if all(i.get('passes') for i in items) else 1)
 " 2>/dev/null
 }
 
-# ── The Kessel Run ─────────────────────────────────────────────────
+# ── Main loop ────────────────────────────────────────────────────
 while true; do
-    PARSEC=$((PARSEC + 1))
+    CYCLE=$((CYCLE + 1))
+    CYCLE_START=$(date +%s)
 
-    if [ "$MAX_PARSECS" -gt 0 ] && [ "$PARSEC" -gt "$MAX_PARSECS" ]; then
+    if [ "$MAX_CYCLES" -gt 0 ] && [ "$CYCLE" -gt "$MAX_CYCLES" ]; then
+        TOTAL_END=$(date +%s)
         echo ""
-        echo "  ════════════════════════════════════════════"
-        echo "  MAX PARSECS ($MAX_PARSECS) REACHED"
-        echo "  \"Great shot kid, that was one in a million!\""
-        echo "  ════════════════════════════════════════════"
+        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        printf "  ${CYAN}${BOLD}MAX CYCLES (%d) REACHED${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" "$MAX_CYCLES" "$(format_duration $((TOTAL_END - TOTAL_START)))"
+        show_progress
+        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
         break
     fi
 
-    # Show parsec banner (cycles through 12 designs)
-    parsec_banner "$PARSEC" | sed "s/#XX/#${PARSEC}/g"
-    echo "  $(date '+%H:%M:%S')"
-    echo ""
+    TOTAL_NOW=$(date +%s)
+    show_cycle_header "$CYCLE" "$PREV_DURATION" "$((TOTAL_NOW - TOTAL_START))"
 
     # Stream output directly — never capture into variables
     cat "${KESSEL_DIR}/PROMPT.md" | claude -p \
@@ -386,23 +199,29 @@ while true; do
         --output-format=text \
         --verbose 2>&1 || true
 
+    CYCLE_END=$(date +%s)
+    PREV_DURATION=$((CYCLE_END - CYCLE_START))
+
     echo ""
-    echo "  ── END PARSEC #${PARSEC} ──"
+    printf "  ${DIM}── cycle %d done ── %s ──${RESET}\n" "$CYCLE" "$(format_duration $PREV_DURATION)"
 
     # Check if all PRD items pass
     if check_all_complete; then
+        TOTAL_END=$(date +%s)
         echo ""
-        echo "  ╔═══════════════════════════════════════════════════╗"
-        echo "  ║         H Y P E R S P A C E   C O M P L E T E    ║"
-        echo "  ║                                                   ║"
-        echo "  ║   All PRD items passing after ${PARSEC} parsecs.        ║"
-        echo "  ║   \"It's not my fault!\" — It's nobody's fault.     ║"
-        echo "  ║   The Kessel Run is done.                         ║"
-        echo "  ╚═══════════════════════════════════════════════════╝"
+        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        printf "  ${CYAN}${BOLD}  ✦  A L L   I T E M S   P A S S I N G  ✦${RESET}\n"
+        printf "  ${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        echo ""
+        printf "  ${WHITE}Cycles:${RESET} %d    ${WHITE}Time:${RESET} %s\n" "$CYCLE" "$(format_duration $((TOTAL_END - TOTAL_START)))"
+        show_progress
+        echo ""
+        printf "  ${DIM}\"Great shot kid, that was one in a million!\"${RESET}\n"
+        echo ""
 
         # macOS notification
         if command -v osascript &>/dev/null; then
-            osascript -e "display notification \"All PRD items passing after ${PARSEC} parsecs.\" with title \"Kessel Run Complete\" sound name \"Glass\""
+            osascript -e "display notification \"All PRD items passing after ${CYCLE} cycles.\" with title \"Kessel Run Complete\" sound name \"Glass\""
         fi
         break
     fi

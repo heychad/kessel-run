@@ -24,7 +24,7 @@ echo ""
 
 # ── Create directories ─────────────────────────────────────────────
 mkdir -p scripts/kessel-run
-mkdir -p specs
+mkdir -p docs/specs
 
 # ── Copy loop.sh ───────────────────────────────────────────────────
 cp "$KESSEL_ROOT/scripts/loop.sh" scripts/kessel-run/loop.sh
@@ -58,17 +58,30 @@ else
 fi
 
 # ── Generate PRD.json ──────────────────────────────────────────────
-if [ ! -f specs/PRD.json ]; then
-cat > specs/PRD.json << PRDJSON_EOF
+if [ ! -f docs/specs/PRD.json ]; then
+cat > docs/specs/PRD.json << PRDJSON_EOF
 {
   "project": "$PROJECT_NAME",
   "description": "",
   "items": []
 }
 PRDJSON_EOF
-    echo "  + specs/PRD.json (empty — populate with your items)"
+    echo "  + docs/specs/PRD.json (empty — populate with your items)"
 else
-    echo "  ~ specs/PRD.json (already exists, skipping)"
+    echo "  ~ docs/specs/PRD.json (already exists, skipping)"
+fi
+
+# ── Generate CLAUDE.md ───────────────────────────────────────────
+if [ ! -f .claude/CLAUDE.md ]; then
+cat > .claude/CLAUDE.md << 'CLAUDEMD_EOF'
+## Back Pressure
+
+Run ALL checks: `bash scripts/kessel-run/backpressure.sh`
+Do NOT run individual checks. The script handles everything.
+CLAUDEMD_EOF
+    echo "  + .claude/CLAUDE.md"
+else
+    echo "  ~ .claude/CLAUDE.md (already exists, skipping)"
 fi
 
 # ── .gitignore entries ─────────────────────────────────────────────
@@ -85,17 +98,6 @@ else
     echo "  + .gitignore created (.claude/worktrees/)"
 fi
 
-# ── CLAUDE.md backpressure note ────────────────────────────────────
-if [ -f CLAUDE.md ]; then
-    if ! grep -q "backpressure" CLAUDE.md 2>/dev/null; then
-        echo "" >> CLAUDE.md
-        echo "## Back Pressure" >> CLAUDE.md
-        echo "Run ALL checks: \`bash scripts/kessel-run/backpressure.sh\`" >> CLAUDE.md
-        echo "Do NOT run individual checks. The script handles everything." >> CLAUDE.md
-        echo "  + CLAUDE.md — added backpressure path"
-    fi
-fi
-
 # ── Next steps ─────────────────────────────────────────────────────
 echo ""
 echo "  ════════════════════════════════════════════"
@@ -104,10 +106,10 @@ echo ""
 echo "  1. Edit scripts/kessel-run/backpressure.sh"
 echo "     (verify auto-detected checks match your stack)"
 echo ""
-echo "  2. Write specs in specs/*.md"
+echo "  2. Write specs in docs/specs/*.md"
 echo "     (one per topic — ground truth requirements)"
 echo ""
-echo "  3. Populate specs/PRD.json with items"
+echo "  3. Populate docs/specs/PRD.json with items"
 echo "     (each item: id, title, spec, passes: false)"
 echo ""
 echo "  4. Test one parsec:"
