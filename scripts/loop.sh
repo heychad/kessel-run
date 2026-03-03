@@ -15,7 +15,7 @@ KESSEL_DIR="${KESSEL_DIR:-scripts/kessel-run}"
 # ── Parsec banners — one per iteration ────────────────────────────
 # Art from ascii-art.de Star Wars collection by Lennert Stock et al.
 parsec_banner() {
-    local n=$(( ($1 - 1) % 12 ))
+    local n=$(( ($1 - 1) % 11 ))
     echo ""
     case $n in
     0)
@@ -274,36 +274,34 @@ cat << 'ART'
     PARSEC #XX  //  "Shuttle Tydirium, what is your cargo and destination?"
 ART
     ;;
-    11)
-# ── Wanted poster ──
-cat << 'ART'
-  ___________________________________________________________
- |                                                           |
- |                    W  A  N  T  E  D                       |
- |                                                           |
- |     For crimes against the PRD:                           |
- |       - Leaving items with passes: false                  |
- |       - Failure to run backpressure                       |
- |       - Unauthorized placeholder implementations          |
- |                                                           |
- |     REWARD: One working feature, fully tested             |
- |                                                           |
- |     BOUNTY HUNTERS:  Experienced Opus models only         |
- |___________________________________________________________|
-
-    PARSEC #XX  //  "Bounty hunters. We don't need their scum."
-ART
-    ;;
     esac
 }
 
-# ── Star Wars banner ──────────────────────────────────────────────
-echo ""
-echo "  ╔═══════════════════════════════════════════════════╗"
-echo "  ║         K E S S E L   R U N                       ║"
-echo "  ║   The fastest hunk of junk in the galaxy          ║"
-echo "  ╚═══════════════════════════════════════════════════╝"
-echo ""
+# ── Hero banner — Millennium Falcon ───────────────────────────────
+cat << 'HERO'
+
+                 _     _
+                /_|   |_\
+               //||   ||\\
+              // ||   || \\
+             //  ||___||  \\
+            /     |   |     \    _
+           /    __|   |__    \  /_\
+          / .--~  |   |  ~--. \|   |
+         /.~ __\  |   |  /   ~.|   |
+        .~  `=='\ |   | /   _.-'.  |
+       /  /      \|   |/ .-~    _.-'
+      |           +---+  \  _.-~  |
+      `=----.____/  #  \____.----='
+       [::::::::|  (_)  |::::::::]       K E S S E L   R U N
+      .=----~~~~~\     /~~~~~----=.      The fastest hunk of junk in the galaxy.
+      |          /`---'\          |
+       \  \     /       \     /  /
+        `.     /         \     .'
+          `.  /._________.\  .'
+            `--._________.--'
+
+HERO
 
 # ── Pre-flight checks ─────────────────────────────────────────────
 PREFLIGHT_OK=true
