@@ -49,25 +49,26 @@ else
 fi
 
 # ── Generate PROGRESS.md ──────────────────────────────────────────
-if [ ! -f PROGRESS.md ]; then
-    cp "$KESSEL_ROOT/templates/PROGRESS.md" PROGRESS.md
-    echo "  + PROGRESS.md"
+mkdir -p .claude
+if [ ! -f .claude/PROGRESS.md ]; then
+    cp "$KESSEL_ROOT/templates/PROGRESS.md" .claude/PROGRESS.md
+    echo "  + .claude/PROGRESS.md"
 else
-    echo "  ~ PROGRESS.md (already exists, skipping)"
+    echo "  ~ .claude/PROGRESS.md (already exists, skipping)"
 fi
 
 # ── Generate PRD.json ──────────────────────────────────────────────
-if [ ! -f PRD.json ]; then
-cat > PRD.json << PRDJSON_EOF
+if [ ! -f specs/PRD.json ]; then
+cat > specs/PRD.json << PRDJSON_EOF
 {
   "project": "$PROJECT_NAME",
   "description": "",
   "items": []
 }
 PRDJSON_EOF
-    echo "  + PRD.json (empty — populate with your items)"
+    echo "  + specs/PRD.json (empty — populate with your items)"
 else
-    echo "  ~ PRD.json (already exists, skipping)"
+    echo "  ~ specs/PRD.json (already exists, skipping)"
 fi
 
 # ── .gitignore entries ─────────────────────────────────────────────
@@ -106,7 +107,7 @@ echo ""
 echo "  2. Write specs in specs/*.md"
 echo "     (one per topic — ground truth requirements)"
 echo ""
-echo "  3. Populate PRD.json with items"
+echo "  3. Populate specs/PRD.json with items"
 echo "     (each item: id, title, spec, passes: false)"
 echo ""
 echo "  4. Test one parsec:"

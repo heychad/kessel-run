@@ -1,6 +1,6 @@
-# Ship's Log
+# Progress
 
-Append-only log across Kessel Run iterations.
-Each parsec appends — never overwrite previous entries.
+Append-only log across loop iterations.
+Each cycle appends — never overwrite previous entries.
 
 ---

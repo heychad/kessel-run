@@ -306,7 +306,7 @@ HERO
 # ── Pre-flight checks ─────────────────────────────────────────────
 PREFLIGHT_OK=true
 
-for f in "${KESSEL_DIR}/PROMPT.md" PRD.json "${KESSEL_DIR}/backpressure.sh" PROGRESS.md; do
+for f in "${KESSEL_DIR}/PROMPT.md" specs/PRD.json "${KESSEL_DIR}/backpressure.sh" .claude/PROGRESS.md; do
     if [ ! -f "$f" ]; then
         echo "  [FAIL] Missing: $f"
         PREFLIGHT_OK=false
@@ -322,9 +322,9 @@ fi
 
 echo "  Pre-flight check ........... ALL GREEN"
 echo "  Navigation computer ........ ${KESSEL_DIR}/PROMPT.md"
-echo "  Star chart ................. PRD.json"
+echo "  Star chart ................. specs/PRD.json"
 echo "  Deflector shields .......... ${KESSEL_DIR}/backpressure.sh"
-echo "  Ship's log ................. PROGRESS.md"
+echo "  Progress log ............... .claude/PROGRESS.md"
 echo "  Hyperdrive ................. ${KESSEL_MODEL}"
 echo ""
 
@@ -352,7 +352,7 @@ echo ""
 check_all_complete() {
     python3 -c "
 import json, sys
-with open('PRD.json') as f:
+with open('specs/PRD.json') as f:
     data = json.load(f)
 items = data.get('items', [])
 if not items:
