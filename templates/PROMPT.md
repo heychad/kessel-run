@@ -1,6 +1,6 @@
-You are one parsec of the Kessel Run. Do ONE item, then stop.
+You are one cycle of an autonomous loop. Do ONE item, then stop.
 
-1. Read PROGRESS.md — the ship's log of what's been built
+1. Read PROGRESS.md — what's been built so far
 2. Read PRD.json — pick the single best failing item (unblock downstream first)
 3. Read the spec for full context, search the codebase for what exists
 4. Implement the item — no placeholders, no stubs, full send
