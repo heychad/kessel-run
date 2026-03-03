@@ -145,7 +145,7 @@ print_hero
 # ── Pre-flight checks ───────────────────────────────────────────
 PREFLIGHT_OK=true
 
-for f in "${KESSEL_DIR}/PROMPT.md" docs/specs/PRD.json "${KESSEL_DIR}/backpressure.sh" .claude/PROGRESS.md; do
+for f in "${KESSEL_DIR}/PROMPT.md" docs/specs/PRD.json "${KESSEL_DIR}/backpressure.sh" docs/PROGRESS.md; do
     if [ ! -f "$f" ]; then
         printf "  ${RED}✗${RESET} Missing: ${WHITE}%s${RESET}\n" "$f"
         PREFLIGHT_OK=false
@@ -161,7 +161,7 @@ fi
 printf "  ${GREEN}✓${RESET} ${DIM}Prompt${RESET}       ${WHITE}${KESSEL_DIR}/PROMPT.md${RESET}\n"
 printf "  ${GREEN}✓${RESET} ${DIM}PRD${RESET}          ${WHITE}docs/specs/PRD.json${RESET}\n"
 printf "  ${GREEN}✓${RESET} ${DIM}Backpressure${RESET} ${WHITE}${KESSEL_DIR}/backpressure.sh${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}Progress${RESET}     ${WHITE}.claude/PROGRESS.md${RESET}\n"
+printf "  ${GREEN}✓${RESET} ${DIM}Progress${RESET}     ${WHITE}docs/PROGRESS.md${RESET}\n"
 printf "  ${GREEN}✓${RESET} ${DIM}Model${RESET}        ${WHITE}${KESSEL_MODEL}${RESET}\n"
 echo ""
 

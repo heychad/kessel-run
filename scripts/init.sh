@@ -49,12 +49,11 @@ else
 fi
 
 # ── Generate PROGRESS.md ──────────────────────────────────────────
-mkdir -p .claude
-if [ ! -f .claude/PROGRESS.md ]; then
-    cp "$KESSEL_ROOT/templates/PROGRESS.md" .claude/PROGRESS.md
-    echo "  + .claude/PROGRESS.md"
+if [ ! -f docs/PROGRESS.md ]; then
+    cp "$KESSEL_ROOT/templates/PROGRESS.md" docs/PROGRESS.md
+    echo "  + docs/PROGRESS.md"
 else
-    echo "  ~ .claude/PROGRESS.md (already exists, skipping)"
+    echo "  ~ docs/PROGRESS.md (already exists, skipping)"
 fi
 
 # ── Generate PRD.json ──────────────────────────────────────────────

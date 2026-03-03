@@ -24,7 +24,7 @@ bash /path/to/kessel-run/scripts/init.sh
 │                                         │
 │  for each cycle:                        │
 │    1. Feed PROMPT.md to Claude          │
-│    2. Claude reads .claude/PROGRESS.md  │
+│    2. Claude reads docs/PROGRESS.md  │
 │    3. Claude picks one failing PRD item │
 │    4. Claude implements it              │
 │    5. Claude runs backpressure.sh       │
@@ -36,7 +36,7 @@ bash /path/to/kessel-run/scripts/init.sh
 └─────────────────────────────────────────┘
 ```
 
-Each iteration gets a **fresh context window** — no accumulated confusion, no degraded performance. `.claude/PROGRESS.md` carries forward what matters. Backpressure (types, lint, tests, build) catches regressions immediately.
+Each iteration gets a **fresh context window** — no accumulated confusion, no degraded performance. `docs/PROGRESS.md` carries forward what matters. Backpressure (types, lint, tests, build) catches regressions immediately.
 
 ## File Reference
 
@@ -47,7 +47,7 @@ Each iteration gets a **fresh context window** — no accumulated confusion, no 
 | `scripts/kessel-run/backpressure.sh` | Quality gate (auto-detects your stack) |
 | `docs/specs/PRD.json` | Items with `passes` booleans |
 | `docs/specs/*.md` | Ground truth requirements (one per topic) |
-| `.claude/PROGRESS.md` | Append-only memory across cycles |
+| `docs/PROGRESS.md` | Append-only memory across cycles |
 | `.claude/CLAUDE.md` | Agent config (backpressure path) |
 
 ## Environment Variables

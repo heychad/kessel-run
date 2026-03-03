@@ -23,7 +23,7 @@ kessel-run/
 ## What Was Decided
 - **Solo Opus per cycle, no teams/subagents** — battle-tested from chad-brain (74/97 items, 12+ cycles)
 - **Stream via `claude -p --verbose 2>&1`** — never capture into variables (crash = lost output)
-- **File layout**: `docs/specs/PRD.json` + `docs/specs/*.md` for specs, `.claude/PROGRESS.md` for log, `.claude/CLAUDE.md` for agent config
+- **File layout**: `docs/specs/PRD.json` + `docs/specs/*.md` for specs, `docs/PROGRESS.md` for log, `.claude/CLAUDE.md` for agent config
 - **Star Wars yellow palette** (`38;5;220`) + white + dim gray — chosen over blue/purple
 - **"Parsec" naming** for iterations — PARSEC 1, PARSEC 2, etc.
 - **Falcon left, stacked KESSEL/RUN right** for hero banner
@@ -36,7 +36,7 @@ kessel-run/
 - Removed `/ralph` skill from `~/.claude/skills/`
 - Added `.gitignore` to kessel-run repo
 - Stripped Star Wars theming from `PROMPT.md` (kept it focused for Claude)
-- Moved `PROGRESS.md` → `.claude/PROGRESS.md`
+- Moved `PROGRESS.md` → `docs/PROGRESS.md`
 - Moved `PRD.json` → `docs/specs/PRD.json`
 - Moved `specs/` → `docs/specs/`
 - Removed `docs/reference/` (research docs, not part of tool)
