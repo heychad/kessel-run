@@ -81,7 +81,7 @@ print(f'{passing} {total}')
 " 2>/dev/null || echo "0 0"
 }
 
-# Output failing item IDs and progress — let the model pick the best one
+# Output failing items with 1-line descriptions — let the model pick the best one
 failing_items() {
     python3 2>/dev/null << 'PYEOF' || echo "## FAILING ITEMS — error reading PRD.json"
 import json, sys
@@ -89,13 +89,18 @@ with open('docs/specs/PRD.json') as f:
     data = json.load(f)
 items = data.get('items', [])
 total = len(items)
-passing = sum(1 for i in items if i.get('passes'))
-failing = [i['id'] for i in items if not i.get('passes')]
+passing_ids = {i['id'] for i in items if i.get('passes')}
+failing = [i for i in items if not i.get('passes')]
 if not failing:
     print('ALL ITEMS PASSING.')
     sys.exit(0)
-print(f'Progress: {passing}/{total} passing')
-print(f'Failing: {", ".join(str(x) for x in failing)}')
+print(f'## FAILING ITEMS — {len(passing_ids)}/{total} passing\n')
+for i in sorted(failing, key=lambda x: x['id']):
+    deps = i.get('depends_on', [])
+    unmet = [d for d in deps if d not in passing_ids]
+    blocked = f'  BLOCKED by {unmet}' if unmet else ''
+    spec = i.get('spec', '')
+    print(f'#{i["id"]}: {i.get("description","?")} [spec: {spec}]{blocked}')
 PYEOF
 }
 
