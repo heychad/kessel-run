@@ -52,16 +52,9 @@ else
     echo "  ~ scripts/kessel-run/backpressure.sh (exists, use --force to update)"
 fi
 
-# ── Generate PROMPT.md ─────────────────────────────────────────────
-if [ ! -f scripts/kessel-run/PROMPT.md ]; then
-    cp "$KESSEL_ROOT/templates/PROMPT.md" scripts/kessel-run/PROMPT.md
-    echo "  + scripts/kessel-run/PROMPT.md (customize if needed)"
-elif [ "$FORCE" = true ]; then
-    cp "$KESSEL_ROOT/templates/PROMPT.md" scripts/kessel-run/PROMPT.md
-    echo "  ↻ scripts/kessel-run/PROMPT.md (updated)"
-else
-    echo "  ~ scripts/kessel-run/PROMPT.md (exists, use --force to update)"
-fi
+# ── Copy PROMPT.md (always overwrite — latest prompt matters) ──────
+cp "$KESSEL_ROOT/templates/PROMPT.md" scripts/kessel-run/PROMPT.md
+echo "  + scripts/kessel-run/PROMPT.md"
 
 # ── Generate PROGRESS.md ──────────────────────────────────────────
 if [ ! -f docs/PROGRESS.md ]; then
