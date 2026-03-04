@@ -242,11 +242,14 @@ clean_stale_locks() {
 
 build_assigned_prompt() {
     local item_id=$1
-    echo "## ASSIGNMENT"
-    echo "You are assigned item #${item_id}. Work ONLY on this item."
-    echo "Skip step 2 below — your item is pre-assigned by the runner."
+    echo "## MANDATORY ASSIGNMENT — ITEM #${item_id}"
     echo ""
-    cat "${KESSEL_DIR}/PROMPT.md"
+    echo "You are assigned to work on item #${item_id} ONLY."
+    echo "Do NOT pick a different item. Do NOT read PRD.json to find items."
+    echo "Your item is pre-selected by the multi-runner coordinator."
+    echo ""
+    # Replace step 2 (pick item) with the assigned item directive
+    sed "s/^2\. Pick the best failing item.*/2. Your item is #${item_id} — assigned to you. Do NOT pick a different item./" "${KESSEL_DIR}/PROMPT.md"
     echo ""
     prd_status
 }
@@ -474,9 +477,12 @@ while true; do
 
         printf "  ${DIM}Item #%d claimed → %s${RESET}\n" "$ITEM_ID" "$CURRENT_BRANCH"
 
+        # Build prompt from project root (where docs/specs/PRD.json lives)
+        ASSIGNED_PROMPT=$(build_assigned_prompt "$ITEM_ID")
+
         # Run Claude in worktree with assigned item
         cd "$CURRENT_WORKTREE"
-        build_assigned_prompt "$ITEM_ID" | claude -p \
+        echo "$ASSIGNED_PROMPT" | claude -p \
             --model "$KESSEL_MODEL" \
             --dangerously-skip-permissions \
             --verbose 2>&1 || true
