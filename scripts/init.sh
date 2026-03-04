@@ -3,8 +3,12 @@
 # Run from the project root directory.
 #
 # Usage:
-#   bash /path/to/kessel-run/scripts/init.sh
+#   bash /path/to/kessel-run/scripts/init.sh           # fresh install (preserves customizations)
+#   bash /path/to/kessel-run/scripts/init.sh --force    # update all templates (overwrites PROMPT.md, backpressure.sh)
 set -euo pipefail
+
+FORCE=false
+[ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ] && FORCE=true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KESSEL_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -15,7 +19,11 @@ PROJECT_NAME="$(basename "$PROJECT_DIR")"
 echo ""
 echo "  ╔═══════════════════════════════════════════════════╗"
 echo "  ║         K E S S E L   R U N                       ║"
+if [ "$FORCE" = true ]; then
+echo "  ║         \"Punch it!\" — Updating (--force)...       ║"
+else
 echo "  ║         \"Punch it!\" — Installing...               ║"
+fi
 echo "  ╚═══════════════════════════════════════════════════╝"
 echo ""
 echo "  Project: $PROJECT_NAME"
@@ -36,16 +44,23 @@ if [ ! -f scripts/kessel-run/backpressure.sh ]; then
     cp "$KESSEL_ROOT/templates/backpressure.sh" scripts/kessel-run/backpressure.sh
     chmod +x scripts/kessel-run/backpressure.sh
     echo "  + scripts/kessel-run/backpressure.sh (customize for your stack)"
+elif [ "$FORCE" = true ]; then
+    cp "$KESSEL_ROOT/templates/backpressure.sh" scripts/kessel-run/backpressure.sh
+    chmod +x scripts/kessel-run/backpressure.sh
+    echo "  ↻ scripts/kessel-run/backpressure.sh (updated)"
 else
-    echo "  ~ scripts/kessel-run/backpressure.sh (already exists, skipping)"
+    echo "  ~ scripts/kessel-run/backpressure.sh (exists, use --force to update)"
 fi
 
 # ── Generate PROMPT.md ─────────────────────────────────────────────
 if [ ! -f scripts/kessel-run/PROMPT.md ]; then
     cp "$KESSEL_ROOT/templates/PROMPT.md" scripts/kessel-run/PROMPT.md
     echo "  + scripts/kessel-run/PROMPT.md (customize if needed)"
+elif [ "$FORCE" = true ]; then
+    cp "$KESSEL_ROOT/templates/PROMPT.md" scripts/kessel-run/PROMPT.md
+    echo "  ↻ scripts/kessel-run/PROMPT.md (updated)"
 else
-    echo "  ~ scripts/kessel-run/PROMPT.md (already exists, skipping)"
+    echo "  ~ scripts/kessel-run/PROMPT.md (exists, use --force to update)"
 fi
 
 # ── Generate PROGRESS.md ──────────────────────────────────────────
@@ -89,12 +104,17 @@ if [ -f .gitignore ]; then
         echo "" >> .gitignore
         echo "# kessel-run" >> .gitignore
         echo ".claude/worktrees/" >> .gitignore
-        echo "  + .gitignore entry added (.claude/worktrees/)"
+        echo ".kessel-locks/" >> .gitignore
+        echo "  + .gitignore entries added (.claude/worktrees/, .kessel-locks/)"
+    elif ! grep -q ".kessel-locks/" .gitignore 2>/dev/null; then
+        echo ".kessel-locks/" >> .gitignore
+        echo "  + .gitignore entry added (.kessel-locks/)"
     fi
 else
     echo "# kessel-run" > .gitignore
     echo ".claude/worktrees/" >> .gitignore
-    echo "  + .gitignore created (.claude/worktrees/)"
+    echo ".kessel-locks/" >> .gitignore
+    echo "  + .gitignore created (.claude/worktrees/, .kessel-locks/)"
 fi
 
 # ── Next steps ─────────────────────────────────────────────────────
