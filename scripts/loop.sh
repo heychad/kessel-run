@@ -107,12 +107,6 @@ build_prompt() {
     echo ""
     tail -50 docs/PROGRESS.md 2>/dev/null || echo "(no progress yet)"
     echo ""
-    echo "## CODEBASE"
-    echo ""
-    find . -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.sh' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name '*.swift' -o -name '*.kt' -o -name '*.dart' \) \
-        -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/dist/*' -not -path '*/.git/*' -not -path '*/build/*' -not -path '*/.claude/*' \
-        2>/dev/null | head -200 | sort
-    echo ""
     failing_items
 }
 
