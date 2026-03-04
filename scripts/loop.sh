@@ -478,15 +478,18 @@ while true; do
         printf "  ${DIM}Item #%d claimed → %s${RESET}\n" "$ITEM_ID" "$CURRENT_BRANCH"
 
         # Build prompt from project root (where docs/specs/PRD.json lives)
-        ASSIGNED_PROMPT=$(build_assigned_prompt "$ITEM_ID")
+        PROMPT_FILE=$(mktemp)
+        build_assigned_prompt "$ITEM_ID" > "$PROMPT_FILE"
+        printf "  ${DIM}Prompt: %d bytes → %s${RESET}\n" "$(wc -c < "$PROMPT_FILE")" "$PROMPT_FILE"
 
         # Run Claude in worktree with assigned item
         cd "$CURRENT_WORKTREE"
-        echo "$ASSIGNED_PROMPT" | claude -p \
+        claude -p \
             --model "$KESSEL_MODEL" \
             --dangerously-skip-permissions \
-            --verbose 2>&1 || true
+            --verbose < "$PROMPT_FILE" 2>&1 || true
         cd "$PROJECT_ROOT"
+        rm -f "$PROMPT_FILE"
 
         # Merge worktree back to main
         if merge_worktree "$CURRENT_WORKTREE" "$CURRENT_BRANCH" "$ITEM_ID"; then
