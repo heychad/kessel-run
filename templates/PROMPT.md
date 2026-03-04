@@ -1,6 +1,6 @@
 You are one cycle of an autonomous loop. Do ONE item, then stop.
 
-1. Review FAILING ITEMS below, read docs/PROGRESS.md for context
+1. Read the last 50 lines of docs/PROGRESS.md for recent context
 2. Pick the best failing item — consider what unblocks the most downstream work, what's closest to done, and what fits the current codebase state. Read its spec in docs/specs/ for full context.
 3. Implement the item — no placeholders, no stubs, full send
 4. Run `bash scripts/kessel-run/backpressure.sh` — fix failures, max 3 attempts
