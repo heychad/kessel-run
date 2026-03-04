@@ -106,16 +106,14 @@ for i in sorted(failing, key=lambda x: x['id']):
 PYEOF
 }
 
-# Compose the full prompt: PROMPT.md + suggested next item + failing items
+# Compose the full prompt: PROMPT.md + assigned item (or first-run pick instructions)
 build_prompt() {
     cat "${KESSEL_DIR}/PROMPT.md"
     echo ""
     if [ -n "$NEXT_ITEM" ]; then
-        echo "## SUGGESTED NEXT ITEM: #${NEXT_ITEM}"
-        echo "The previous parsec recommended this item. Pick a different one if you see a better choice."
-        echo ""
+        echo "## YOUR ITEM: #${NEXT_ITEM}"
+        echo "This item was selected by the previous parsec. Implement it."
     fi
-    failing_items
 }
 
 show_progress() {
