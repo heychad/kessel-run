@@ -108,11 +108,14 @@ PYEOF
 
 # Compose the full prompt: PROMPT.md + assigned item (or first-run pick instructions)
 build_prompt() {
-    cat "${KESSEL_DIR}/PROMPT.md"
-    echo ""
     if [ -n "$NEXT_ITEM" ]; then
+        # Subsequent parsecs: replace step 2 with direct assignment
+        sed 's/^2\. If YOUR ITEM.*/2. Your item is #'"${NEXT_ITEM}"' — read its spec in docs\/specs\/ for full context. Do NOT read PRD.json to find items./' "${KESSEL_DIR}/PROMPT.md"
+        echo ""
         echo "## YOUR ITEM: #${NEXT_ITEM}"
         echo "This item was selected by the previous parsec. Implement it."
+    else
+        cat "${KESSEL_DIR}/PROMPT.md"
     fi
 }
 
