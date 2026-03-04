@@ -83,7 +83,7 @@ print(f'{passing} {total}')
 
 # Extract failing items from PRD.json as compact summary for the prompt
 prd_status() {
-    python3 -c "
+    python3 2>/dev/null << 'PYEOF' || echo "## PRD STATUS — error reading PRD.json"
 import json, sys
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
@@ -108,16 +108,15 @@ for i in failing:
     checks = ' | '.join(i.get('verification', [])[:2])
     blocked = ''
     if deps:
-        # Check if any dependency is still failing
         passing_ids = {p['id'] for p in passing}
         dep_ids = set(i.get('depends_on', []))
         unmet = dep_ids - passing_ids
         if unmet:
             blocked = f' ⛔ BLOCKED by [{", ".join(str(d) for d in sorted(unmet))}]'
-    print(f'  #{i[\"id\"]}: {desc} [spec: {spec}] [depends: {deps or \"none\"}]{blocked}')
+    print(f'  #{i["id"]}: {desc} [spec: {spec}] [depends: {deps or "none"}]{blocked}')
     if checks:
         print(f'       verify: {checks}')
-" 2>/dev/null || echo "## PRD STATUS — error reading PRD.json"
+PYEOF
 }
 
 # Compose the full prompt: static PROMPT.md + dynamic PRD status
