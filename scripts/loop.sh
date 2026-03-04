@@ -16,7 +16,7 @@
 # and merges back to main. Without RUNNER_ID, behaves exactly as before.
 set -euo pipefail
 
-KESSEL_MODEL="${KESSEL_MODEL:-claude-opus-4-6}"
+KESSEL_MODEL="${KESSEL_MODEL:-claude-sonnet-4-6}"
 KESSEL_DIR="${KESSEL_DIR:-scripts/kessel-run}"
 
 # ── Multi-runner mode ─────────────────────────────────────────────
