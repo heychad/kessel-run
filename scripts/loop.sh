@@ -81,72 +81,39 @@ print(f'{passing} {total}')
 " 2>/dev/null || echo "0 0"
 }
 
-# Pick the best unblocked failing item — outputs compact context for the prompt
-pick_best_item() {
-    python3 2>/dev/null << 'PYEOF' || echo "## YOUR ITEM — error reading PRD.json"
+# Output failing item IDs and progress — let the model pick the best one
+failing_items() {
+    python3 2>/dev/null << 'PYEOF' || echo "## FAILING ITEMS — error reading PRD.json"
 import json, sys
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
 items = data.get('items', [])
 total = len(items)
-passing_ids = {i['id'] for i in items if i.get('passes')}
-passing_count = len(passing_ids)
-
-if passing_count == total and total > 0:
+passing = sum(1 for i in items if i.get('passes'))
+failing = [i['id'] for i in items if not i.get('passes')]
+if not failing:
     print('ALL ITEMS PASSING.')
     sys.exit(0)
-
-# Find best unblocked failing item (lowest ID, all deps met)
-best = None
-for i in sorted(items, key=lambda x: x['id']):
-    if i.get('passes'):
-        continue
-    deps = set(i.get('depends_on', []))
-    if deps - passing_ids:
-        continue
-    best = i
-    break
-
-# Fallback: if all failing items are blocked, pick first failing
-if best is None:
-    for i in sorted(items, key=lambda x: x['id']):
-        if not i.get('passes'):
-            best = i
-            break
-
-if best is None:
-    print('ALL ITEMS PASSING.')
-    sys.exit(0)
-
-# Output compact item context
-iid = best['id']
-desc = best.get('description', '?')
-spec = best.get('spec', '?')
-deps = best.get('depends_on', [])
-verification = best.get('verification', [])
-
-print('## YOUR ITEM\n')
-print(f'#{iid}: {desc}')
-print(f'Spec: {spec}')
-if deps:
-    parts = []
-    for d in deps:
-        status = 'passing' if d in passing_ids else 'FAILING'
-        parts.append(f'#{d} ({status})')
-    print(f'Depends on: {", ".join(parts)}')
-else:
-    print('Depends on: none')
-if verification:
-    print(f'Verify: {" | ".join(verification)}')
-print(f'\nProgress: {passing_count}/{total} passing')
+print(f'Progress: {passing}/{total} passing')
+print(f'Failing: {", ".join(str(x) for x in failing)}')
 PYEOF
 }
 
-# Compose the full prompt: static PROMPT.md + single pre-selected item
+# Compose the full prompt: PROMPT.md + progress tail + failing IDs + codebase snapshot
 build_prompt() {
     cat "${KESSEL_DIR}/PROMPT.md"
     echo ""
-    pick_best_item
+    echo "## RECENT PROGRESS"
+    echo ""
+    tail -50 docs/PROGRESS.md 2>/dev/null || echo "(no progress yet)"
+    echo ""
+    echo "## CODEBASE"
+    echo ""
+    find . -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.sh' -o -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name '*.swift' -o -name '*.kt' -o -name '*.dart' \) \
+        -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/dist/*' -not -path '*/.git/*' -not -path '*/build/*' -not -path '*/.claude/*' \
+        2>/dev/null | head -200 | sort
+    echo ""
+    failing_items
 }
 
 show_progress() {
@@ -272,44 +239,7 @@ build_assigned_prompt() {
     echo ""
     cat "${KESSEL_DIR}/PROMPT.md"
     echo ""
-    # Output compact context for just this item
-    python3 - "$item_id" 2>/dev/null << 'PYEOF' || echo "## YOUR ITEM — error reading PRD.json"
-import json, sys
-item_id = int(sys.argv[1])
-with open('docs/specs/PRD.json') as f:
-    data = json.load(f)
-items = data.get('items', [])
-total = len(items)
-passing_ids = {i['id'] for i in items if i.get('passes')}
-passing_count = len(passing_ids)
-best = None
-for i in items:
-    if i['id'] == item_id:
-        best = i
-        break
-if best is None:
-    print(f'## YOUR ITEM\n\n#{item_id}: ITEM NOT FOUND')
-    sys.exit(0)
-iid = best['id']
-desc = best.get('description', '?')
-spec = best.get('spec', '?')
-deps = best.get('depends_on', [])
-verification = best.get('verification', [])
-print('## YOUR ITEM\n')
-print(f'#{iid}: {desc}')
-print(f'Spec: {spec}')
-if deps:
-    parts = []
-    for d in deps:
-        status = 'passing' if d in passing_ids else 'FAILING'
-        parts.append(f'#{d} ({status})')
-    print(f'Depends on: {", ".join(parts)}')
-else:
-    print('Depends on: none')
-if verification:
-    print(f'Verify: {" | ".join(verification)}')
-print(f'\nProgress: {passing_count}/{total} passing')
-PYEOF
+    failing_items
 }
 
 merge_worktree() {

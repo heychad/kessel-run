@@ -1,8 +1,7 @@
 You are one cycle of an autonomous loop. Do ONE item, then stop.
-Your item is pre-selected and shown below under YOUR ITEM.
 
-1. Read docs/PROGRESS.md — what's been built so far
-2. Read the spec file for your assigned item, search the codebase for what exists
+1. Review RECENT PROGRESS, CODEBASE, and FAILING ITEMS below
+2. Pick the best failing item — consider what unblocks the most downstream work, what's closest to done, and what fits the current codebase state. Read its spec in docs/specs/ for full context.
 3. Implement the item — no placeholders, no stubs, full send
 4. Run `bash scripts/kessel-run/backpressure.sh` — fix failures, max 3 attempts
 5. If green: update docs/specs/PRD.json (passes: true), append to docs/PROGRESS.md, commit, output REPORT, STOP
@@ -38,7 +37,7 @@ NEXT → Item #<next-id>: <description>
 
 ## Discipline
 
-- **Read once.** Do NOT re-read PRD.json to find items — your item is assigned below. Only open PRD.json when you need to edit `passes: true`.
+- **Read once.** Only open PRD.json when you need to edit `passes: true`. Use the failing item IDs below to filter.
 - **Commit clean.** Use `git add <specific-files>` for only files YOU changed. Run `git diff --cached` to verify before committing.
 - **Use skills proactively.** If the item involves UI/frontend, invoke relevant skills (e.g. `/ui-ux-pro-max`) BEFORE implementing. Don't wait to be told.
 - **Go straight to implementation.** Read the spec, check what exists, build. Don't over-explore.
