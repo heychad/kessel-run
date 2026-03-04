@@ -159,10 +159,10 @@ show_parsec_header() {
 
     echo ""
     if [ "$parsec" -gt 1 ]; then
-        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}%s  ${DIM}%s  last ${WHITE}%s${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
+        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}%b  ${DIM}%s  last ${WHITE}%s${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
             "$parsec" "$runner_tag" "$time_now" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
     else
-        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}%s  ${DIM}%s${RESET}\n" "$parsec" "$runner_tag" "$time_now"
+        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}%b  ${DIM}%s${RESET}\n" "$parsec" "$runner_tag" "$time_now"
     fi
     show_progress
     echo ""
