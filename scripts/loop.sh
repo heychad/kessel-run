@@ -27,6 +27,8 @@ PROJECT_ROOT="$(pwd)"
 CURRENT_ITEM_ID=""
 CURRENT_WORKTREE=""
 CURRENT_BRANCH=""
+NEXT_ITEM=""
+PARSEC_OUTPUT=""
 
 # ── ANSI Colors (Star Wars palette) ─────────────────────────────
 YELLOW='\033[38;5;220m'
@@ -104,10 +106,15 @@ for i in sorted(failing, key=lambda x: x['id']):
 PYEOF
 }
 
-# Compose the full prompt: PROMPT.md + progress tail + failing IDs + codebase snapshot
+# Compose the full prompt: PROMPT.md + suggested next item + failing items
 build_prompt() {
     cat "${KESSEL_DIR}/PROMPT.md"
     echo ""
+    if [ -n "$NEXT_ITEM" ]; then
+        echo "## SUGGESTED NEXT ITEM: #${NEXT_ITEM}"
+        echo "The previous parsec recommended this item. Pick a different one if you see a better choice."
+        echo ""
+    fi
     failing_items
 }
 
@@ -493,12 +500,16 @@ while true; do
         # Clean git staging area — prevent committing stale staged files
         git reset --quiet HEAD -- . 2>/dev/null || true
 
-        # Stream output directly — never capture into variables
-        # build_prompt injects PROMPT.md + dynamic PRD status
+        # Stream output, tee to temp file to extract NEXT item suggestion
+        PARSEC_OUTPUT=$(mktemp)
         build_prompt | claude -p \
             --model "$KESSEL_MODEL" \
             --dangerously-skip-permissions \
-            --verbose 2>&1 || true
+            --verbose 2>&1 | tee "$PARSEC_OUTPUT" || true
+
+        # Extract next item recommendation for the following parsec
+        NEXT_ITEM=$(grep -oE 'NEXT → Item #[0-9]+' "$PARSEC_OUTPUT" | grep -oE '[0-9]+' | tail -1 || true)
+        rm -f "$PARSEC_OUTPUT"
     fi
 
     # Stop timer
