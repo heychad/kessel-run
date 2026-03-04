@@ -103,10 +103,6 @@ PYEOF
 build_prompt() {
     cat "${KESSEL_DIR}/PROMPT.md"
     echo ""
-    echo "## RECENT PROGRESS"
-    echo ""
-    tail -50 docs/PROGRESS.md 2>/dev/null || echo "(no progress yet)"
-    echo ""
     failing_items
 }
 
