@@ -45,7 +45,7 @@ count_prd_progress() {
 import json, sys
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
-items = data.get('items', [])
+items = data if isinstance(data, list) else data.get('items', [])
 total = len(items)
 passing = sum(1 for i in items if i.get('passes'))
 print(f'{passing} {total}')
@@ -191,7 +191,7 @@ check_all_complete() {
 import json, sys
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
-items = data.get('items', [])
+items = data if isinstance(data, list) else data.get('items', [])
 if not items:
     sys.exit(1)
 sys.exit(0 if all(i.get('passes') for i in items) else 1)
