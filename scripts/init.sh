@@ -69,11 +69,30 @@ if [ ! -f docs/specs/PRD.json ]; then
 cat > docs/specs/PRD.json << PRDJSON_EOF
 {
   "project": "$PROJECT_NAME",
-  "description": "",
-  "items": []
+  "goal": "",
+  "categories": [],
+  "items": [
+    {
+      "id": 1,
+      "category": "",
+      "description": "Example item — replace with your first task",
+      "spec": "docs/specs/your-spec.md",
+      "steps": [
+        "Step 1: what to do",
+        "Step 2: what to do next"
+      ],
+      "passes": false,
+      "notes": "",
+      "depends_on": [],
+      "verification": [
+        "npx tsc --noEmit passes",
+        "Grep: src/file.ts contains expectedFunction"
+      ]
+    }
+  ]
 }
 PRDJSON_EOF
-    echo "  + docs/specs/PRD.json (empty — populate with your items)"
+    echo "  + docs/specs/PRD.json (example item — replace with your tasks)"
 else
     echo "  ~ docs/specs/PRD.json (already exists, skipping)"
 fi

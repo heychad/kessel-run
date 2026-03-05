@@ -25,8 +25,8 @@ bash /path/to/kessel-run/scripts/init.sh
 │  for each cycle:                        │
 │    1. Feed PROMPT.md to Claude          │
 │    2. Claude reads docs/PROGRESS.md  │
-│    3. Claude picks one failing PRD item │
-│    4. Claude implements it              │
+│    3. Claude picks 1-3 failing PRD items│
+│    4. Claude implements them            │
 │    5. Claude runs backpressure.sh       │
 │    6. If green → commit, log, stop      │
 │    7. If stuck → log failure, stop      │
@@ -45,10 +45,61 @@ Each iteration gets a **fresh context window** — no accumulated confusion, no 
 | `scripts/kessel-run/loop.sh` | Outer bash loop with progress tracking |
 | `scripts/kessel-run/PROMPT.md` | Agent instructions (fed to Claude each cycle) |
 | `scripts/kessel-run/backpressure.sh` | Quality gate (auto-detects your stack including E2E) |
-| `docs/specs/PRD.json` | Items with `passes` booleans |
+| `docs/specs/PRD.json` | Work items with steps, verification, and `passes` tracking |
 | `docs/specs/*.md` | Ground truth requirements (one per topic) |
 | `docs/PROGRESS.md` | Append-only memory across cycles |
 | `.claude/CLAUDE.md` | Agent config (backpressure path) |
+
+## PRD Schema
+
+`docs/specs/PRD.json` drives the loop. Each item is a self-contained work unit with explicit steps and machine-checkable verification:
+
+```json
+{
+  "project": "my-app",
+  "goal": "What this sprint/batch achieves",
+  "categories": ["auth", "ui", "api"],
+  "items": [
+    {
+      "id": 1,
+      "category": "auth",
+      "description": "Add JWT refresh token rotation",
+      "spec": "docs/specs/auth.md",
+      "steps": [
+        "Add refreshToken field to session table in schema.ts",
+        "Create rotateToken mutation that invalidates old token and issues new one",
+        "Wire refresh logic into the auth middleware"
+      ],
+      "passes": false,
+      "notes": "Currently tokens expire with no refresh path",
+      "depends_on": [],
+      "verification": [
+        "Grep: schema.ts contains refreshToken field",
+        "Grep: auth middleware calls rotateToken",
+        "npx tsc --noEmit passes"
+      ]
+    }
+  ]
+}
+```
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `id` | number | Unique item ID, referenced by `depends_on` |
+| `category` | string | Groups items — Claude batches from the same category |
+| `description` | string | One-line summary of what to build |
+| `spec` | string | File path to the spec doc (Claude reads this for context) |
+| `steps` | string[] | Explicit implementation steps — no ambiguity |
+| `passes` | boolean | Flipped to `true` by Claude after verification |
+| `notes` | string | Current state context that helps Claude understand what exists |
+| `depends_on` | number[] | Item IDs that must pass first (unblocks downstream) |
+| `verification` | string[] | Concrete checks Claude runs before marking done |
+
+**Tips:**
+- `steps` are the secret sauce — explicit instructions beat vague descriptions
+- `verification` gives Claude a machine-checkable "done" definition (greps, type checks, build commands)
+- `depends_on` lets Claude prioritize unblocking work
+- `spec` points to a markdown file with full requirements — keep PRD items lean, specs rich
 
 ## Environment Variables
 
@@ -62,7 +113,7 @@ Each iteration gets a **fresh context window** — no accumulated confusion, no 
 
 Built from experience running 74/97 PRD items across 12+ autonomous cycles. The patterns that survive:
 
-- **One item per cycle.** Focused work beats multitasking.
+- **1–3 items per cycle, same spec.** Shared context = fewer mistakes.
 - **Fresh context is your greatest weapon.** Don't accumulate — reset.
 - **Backpressure catches what you miss.** Types + lint + build + E2E = confidence.
 - **Stream, don't capture.** `claude -p --verbose 2>&1` — variable capture loses output on crash.
