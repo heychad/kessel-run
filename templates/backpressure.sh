@@ -10,7 +10,7 @@ check() {
   EXIT_CODE=1
 }
 
-# Auto-detect checks based on config files
+# ── Static checks (auto-detect based on config files) ───────────
 [ -f tsconfig.json ]     && check "tsc" npx tsc --noEmit
 [ -f eslint.config.mjs ] || [ -f .eslintrc.json ] && check "eslint" npx eslint . --max-warnings 0
 [ -f vitest.config.ts ]  || [ -f vitest.config.mts ] && check "vitest" npx vitest run
@@ -19,6 +19,12 @@ check() {
 [ -f pyproject.toml ]    && check "pytest" python -m pytest
 [ -f Cargo.toml ]        && check "cargo" cargo test
 [ -d convex ]            && check "convex" npx convex typecheck
+
+# ── E2E tests (auto-detect Playwright or Cypress) ───────────────
+[ -f playwright.config.ts ] || [ -f playwright.config.js ] && \
+  ls tests/*.spec.ts tests/*.spec.js e2e/*.spec.ts e2e/*.spec.js 2>/dev/null | head -1 >/dev/null && \
+  check "playwright" npx playwright test
+[ -f cypress.config.ts ] || [ -f cypress.config.js ] && check "cypress" npx cypress run
 
 if [ $EXIT_CODE -eq 0 ]; then echo "ALL GREEN"
 else echo "$FAILURES" | head -100; fi

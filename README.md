@@ -44,7 +44,7 @@ Each iteration gets a **fresh context window** — no accumulated confusion, no 
 |------|---------|
 | `scripts/kessel-run/loop.sh` | Outer bash loop with progress tracking |
 | `scripts/kessel-run/PROMPT.md` | Agent instructions (fed to Claude each cycle) |
-| `scripts/kessel-run/backpressure.sh` | Quality gate (auto-detects your stack) |
+| `scripts/kessel-run/backpressure.sh` | Quality gate (auto-detects your stack including E2E) |
 | `docs/specs/PRD.json` | Items with `passes` booleans |
 | `docs/specs/*.md` | Ground truth requirements (one per topic) |
 | `docs/PROGRESS.md` | Append-only memory across cycles |
@@ -64,7 +64,7 @@ Built from experience running 74/97 PRD items across 12+ autonomous cycles. The 
 
 - **One item per cycle.** Focused work beats multitasking.
 - **Fresh context is your greatest weapon.** Don't accumulate — reset.
-- **Backpressure catches what you miss.** Types + tests + build = confidence.
+- **Backpressure catches what you miss.** Types + lint + build + E2E = confidence.
 - **Stream, don't capture.** `claude -p --verbose 2>&1` — variable capture loses output on crash.
 - **Bail after 3 attempts.** Fresh context on the next cycle often solves what this one couldn't.
 

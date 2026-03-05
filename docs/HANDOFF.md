@@ -3,7 +3,7 @@
 **Updated:** 2026-03-03
 
 ## Current State
-Kessel Run is feature-complete with a modernized terminal UI (Star Wars yellow palette, progress bar, live timer, parsec naming). Published as v0.1.0 on GitHub at `heychad/kessel-run`. **Not yet tested against a real PRD.json** — that's the immediate next step. User has a project with ~5 PRD items ready to test.
+Kessel Run is feature-complete with a modernized terminal UI (Star Wars yellow palette, progress bar, live timer, parsec naming). Published as v0.1.0 on GitHub at `heychad/kessel-run`. Now tested against Plinth (65-item UI sprint). Backpressure template updated with E2E auto-detection (Playwright + Cypress).
 
 ## What Exists
 ```
@@ -13,7 +13,7 @@ kessel-run/
 │   └── loop.sh              # Core loop — yellow/white/dim colors, progress bar, terminal title timer
 ├── templates/
 │   ├── PROMPT.md            # 11-line agent prompt (generic, no Star Wars in prompt)
-│   ├── backpressure.sh      # Auto-detecting quality gate (tsc/eslint/vitest/jest/next/pytest/cargo/convex)
+│   ├── backpressure.sh      # Auto-detecting quality gate (tsc/eslint/vitest/jest/next/pytest/cargo/convex/playwright/cypress)
 │   └── PROGRESS.md          # Empty append-only log template
 ├── README.md                # Quick start, file reference, env vars, credits
 ├── LICENSE                  # MIT
@@ -55,10 +55,11 @@ kessel-run/
 - Pushed all changes
 
 ## What To Do Next
-1. **Test against a real project** — user has a project with ~5 PRD items. Run `bash ~/vibes/tools/kessel-run/scripts/init.sh` from project root, populate PRD, run `./scripts/kessel-run/loop.sh 1`
+1. ~~**Test against a real project**~~ — DONE, running against Plinth (65-item UI sprint)
 2. **Verify hero banner alignment** — the `%-42s` padding for side-by-side Falcon + title needs visual confirmation in a real terminal
 3. **Verify timer cleanup** — the background `start_timer` process (updates terminal title) needs testing for clean kill/wait behavior, no orphan processes or "Terminated" messages
 4. **Distribution strategy** — currently "clone + init.sh". Could become brew tap, npm package, or stay simple
+5. **Iterate from Plinth run feedback** — first real-world loop results will surface improvements
 
 ## Gotchas
 - **`loop.sh` can't run inside Claude Code** — nested sessions error. Must be run from a regular terminal
