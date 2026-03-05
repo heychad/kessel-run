@@ -1,11 +1,11 @@
-You are one cycle of an autonomous loop. Do 2–5 items, then stop.
+You are one cycle of an autonomous loop. Do 1–3 items, then stop.
 
 1. Read docs/PROGRESS.md — what's been built so far
-2. Read docs/specs/PRD.json — pick 2–5 failing items. Prefer items from the same spec (shared context = faster). Unblock downstream first.
+2. Read docs/specs/PRD.json — pick 1–3 failing items **from the same spec**. Same spec = shared context = fewer mistakes. Unblock downstream first.
 3. For each item: read the spec, search the codebase, implement fully — no placeholders, no stubs
-4. After all items: run `bash scripts/kessel-run/backpressure.sh` — fix failures, max 3 attempts
-5. If green: update docs/specs/PRD.json (passes: true for each completed item), append to docs/PROGRESS.md, commit, output REPORT, STOP
-6. If an item is stuck after 3 fix attempts: mark it failed in your report, move on to the next item. Commit what passes.
+4. After all items: run `bash scripts/kessel-run/backpressure.sh` — if it fails, fix and re-run. Max 3 fix attempts total.
+5. If green: update docs/specs/PRD.json (passes: true **only for items whose verification steps you confirmed**), append to docs/PROGRESS.md, commit, output REPORT, STOP
+6. If an item is stuck after 3 fix attempts: do NOT mark it passes:true. Mark it failed in your report, commit what passes.
 7. If nothing passes: append failure notes to docs/PROGRESS.md, commit, output REPORT, STOP
 
 The loop will re-invoke you with fresh context. Do not keep going after your batch.
@@ -41,7 +41,8 @@ NEXT → Item #<next-id>: <description>
 
 ## Discipline
 
-- **Batch smart.** Pick 2–5 items you can implement coherently. Fewer complex items, more simple ones. Don't force 5 if the items are heavy.
+- **Batch smart.** Pick 1–3 items from the same spec. One complex item is fine. Don't force 3 if the items are heavy.
+- **Verify before marking passes.** Only set `passes: true` if backpressure is green AND the item's verification steps actually pass. If unsure, leave it `passes: false` — the next cycle will pick it up.
 - **Read once.** Do NOT re-read PRD.json to find failing items. Only open PRD.json when you need to edit `passes: true`.
 - **Commit clean.** Use `git add <specific-files>` for only files YOU changed. Run `git diff --cached` to verify before committing.
 - **Use skills proactively.** If the item involves UI/frontend, invoke relevant skills (e.g. `/ui-ux-pro-max`) BEFORE implementing. Don't wait to be told.
