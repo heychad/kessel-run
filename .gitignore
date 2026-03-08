@@ -2,3 +2,6 @@
 *.swp
 *.swo
 *~
+.kessel-run-stuck
+.kessel-run-state
+logs/
