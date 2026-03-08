@@ -7,10 +7,33 @@
 #   ./scripts/kessel-run/loop.sh 5            # run 5 parsecs
 #   ./scripts/kessel-run/loop.sh 0            # unlimited parsecs
 #   ./scripts/kessel-run/loop.sh watch        # single parsec in TUI mode
+#   ./scripts/kessel-run/loop.sh --skip-stuck 5  # exclude items stuck 5+ cycles
+#   KESSEL_SKIP_STUCK=5 ./scripts/kessel-run/loop.sh  # same via env
 set -euo pipefail
 
 KESSEL_MODEL="${KESSEL_MODEL:-claude-sonnet-4-6}"
 KESSEL_DIR="${KESSEL_DIR:-scripts/kessel-run}"
+
+# ── Parse flags ────────────────────────────────────────────────
+SKIP_STUCK_THRESHOLD="${KESSEL_SKIP_STUCK:-0}"  # 0 = disabled
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-stuck)
+            SKIP_STUCK_THRESHOLD="${2:-5}"
+            shift 2
+            ;;
+        --skip-stuck=*)
+            SKIP_STUCK_THRESHOLD="${1#*=}"
+            shift
+            ;;
+        *)
+            POSITIONAL+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 # ── ANSI Colors (Star Wars palette) ─────────────────────────────
 YELLOW='\033[38;5;220m'
@@ -34,7 +57,38 @@ cleanup() {
     [ -n "${TIMER_PID:-}" ] && kill "$TIMER_PID" 2>/dev/null
     printf '\033]0;\007'
 }
+
+# Graceful Ctrl+C — show status snapshot before exiting
+handle_interrupt() {
+    # Kill timer first
+    [ -n "${TIMER_PID:-}" ] && kill "$TIMER_PID" 2>/dev/null
+    TIMER_PID=""
+    printf '\033]0;\007'
+
+    local now=$(date +%s)
+    local elapsed=$((now - ${TOTAL_START:-$now}))
+    local progress
+    progress=$(count_prd_progress 2>/dev/null || echo "? ? ")
+    local passing=$(echo "$progress" | cut -d' ' -f1)
+    local total=$(echo "$progress" | cut -d' ' -f2)
+    local gained=$(( ${passing:-0} - ${TOTAL_ITEMS_PASSED_START:-0} ))
+    [ "$gained" -lt 0 ] && gained=0
+
+    echo ""
+    printf "\n  ${YELLOW}━━━ INTERRUPTED ━━━${RESET}\n"
+    printf "  ${DIM}Parsec:${RESET} ${WHITE}%s${RESET}  ${DIM}Time:${RESET} ${WHITE}%s${RESET}  ${DIM}Items gained:${RESET} ${WHITE}+%d${RESET}  ${DIM}Progress:${RESET} ${WHITE}%s/%s${RESET}\n" \
+        "${PARSEC:-?}" "$(format_duration $elapsed)" "$gained" "$passing" "$total"
+    if [ -n "${_vel_str:-}" ] && [ "${_vel_str:-0.0}" != "0.0" ]; then
+        printf "  ${DIM}Velocity:${RESET} ${CYAN}%s items/parsec${RESET}  ${DIM}State saved — resume with same command${RESET}\n" "$_vel_str"
+    else
+        printf "  ${DIM}State saved — resume with same command${RESET}\n"
+    fi
+    printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━${RESET}\n\n"
+    exit 130
+}
+
 trap cleanup EXIT
+trap handle_interrupt INT
 
 # ── Helpers ──────────────────────────────────────────────────────
 format_duration() {
@@ -126,9 +180,10 @@ get_stuck_warning() {
 # Returns comma-separated IDs of stuck items (3+ failures) for prompt injection.
 get_stuck_ids_for_prompt() {
     [ -f "$STUCK_FILE" ] || return 0
+    local threshold=${1:-3}
     local ids=()
     while read -r id cnt; do
-        [ "$cnt" -ge 3 ] && ids+=("$id")
+        [ "$cnt" -ge "$threshold" ] && ids+=("$id")
     done < "$STUCK_FILE"
     (IFS=','; echo "${ids[*]}")
 }
@@ -161,9 +216,13 @@ for spec, counts in sorted(specs.items()):
     p, t = counts['pass'], counts['total']
     pct = p / t if t else 0
     filled = round(pct * bar_w)
-    empty = bar_w - filled - (1 if 0 < pct < 1 else 0)
-    tip = '\u25b8' if 0 < pct < 1 else ''
-    bar = '\u2588' * filled + tip + '\u2591' * empty
+    empty = bar_w - filled
+    if 0 < p < t:
+        # In progress: filled + tip + empty (tip takes 1 from empty)
+        empty = max(0, empty - 1)
+        bar = '\u2588' * filled + '\u25b8' + '\u2591' * empty
+    else:
+        bar = '\u2588' * filled + '\u2591' * empty
     if p == t:
         status = '\033[38;5;114m\u2713\033[0m'
     elif p == 0:
@@ -172,6 +231,56 @@ for spec, counts in sorted(specs.items()):
         status = f'{round(pct*100)}%'
     print(f'  {name:<{name_w}} {bar}  {p:>3}/{t:<3}  {status}')
 " 2>/dev/null || printf "  ${DIM}(spec data unavailable)${RESET}\n"
+}
+
+# End-of-run summary: hardest items and still-stuck items.
+show_run_summary() {
+    local run_outcome="$1"  # "complete" or "max" or "interrupted"
+
+    # Show still-failing items
+    local failing_count
+    failing_count=$(python3 -c "
+import json
+with open('docs/specs/PRD.json') as f:
+    data = json.load(f)
+items = data if isinstance(data, list) else data.get('items', [])
+failing = [i for i in items if not i.get('passes')]
+print(len(failing))
+" 2>/dev/null || echo "0")
+
+    if [ "$failing_count" -gt 0 ] && [ "$run_outcome" != "complete" ]; then
+        printf "\n  ${WHITE}${BOLD}Still failing (%d):${RESET}\n" "$failing_count"
+        python3 -c "
+import json
+with open('docs/specs/PRD.json') as f:
+    data = json.load(f)
+items = data if isinstance(data, list) else data.get('items', [])
+failing = [(i.get('id','?'), i.get('description','')[:60]) for i in items if not i.get('passes')]
+for fid, desc in failing[:15]:
+    print(f'    \033[38;5;203m#{fid}\033[0m {desc}')
+if len(failing) > 15:
+    print(f'    \033[38;5;240m... and {len(failing)-15} more\033[0m')
+" 2>/dev/null
+    fi
+
+    # Show hardest items (most cycles in stuck file)
+    if [ -f "$STUCK_FILE" ] && [ -s "$STUCK_FILE" ]; then
+        local hardest
+        hardest=$(sort -t' ' -k2 -rn "$STUCK_FILE" | head -5)
+        if [ -n "$hardest" ]; then
+            printf "\n  ${WHITE}${BOLD}Hardest items (most attempts):${RESET}\n"
+            while read -r id cnt; do
+                printf "    ${ORANGE}#%s${RESET} ${DIM}— %d consecutive failures${RESET}\n" "$id" "$cnt"
+            done <<< "$hardest"
+        fi
+    fi
+
+    # Show log file location
+    if [ -f "$LOG_FILE" ]; then
+        local log_lines
+        log_lines=$(wc -l < "$LOG_FILE" | tr -d ' ')
+        printf "\n  ${DIM}Log: %s (%s entries)${RESET}\n" "$LOG_FILE" "$log_lines"
+    fi
 }
 
 # Write one structured log line per parsec.
@@ -212,10 +321,20 @@ cleanup_state() {
 
 # Compose the full prompt, injecting stuck IDs if any.
 build_prompt() {
+    # --skip-stuck: completely exclude items stuck beyond threshold
+    if [ "$SKIP_STUCK_THRESHOLD" -gt 0 ]; then
+        local skip_ids
+        skip_ids=$(get_stuck_ids_for_prompt "$SKIP_STUCK_THRESHOLD")
+        if [ -n "$skip_ids" ]; then
+            printf "<!-- KESSEL-RUN: SKIP these item IDs entirely — they have failed %d+ consecutive parsecs and are excluded from this run: %s. Do NOT attempt them. -->\n\n" \
+                "$SKIP_STUCK_THRESHOLD" "$skip_ids"
+        fi
+    fi
+    # Soft deprioritize items stuck 3+ cycles (even if below skip threshold)
     local stuck_ids
-    stuck_ids=$(get_stuck_ids_for_prompt)
+    stuck_ids=$(get_stuck_ids_for_prompt 3)
     if [ -n "$stuck_ids" ]; then
-        printf "<!-- KESSEL-RUN: The following item IDs have failed 3+ consecutive parsecs. Deprioritize them this parsec and focus on other failing items: %s -->\n\n" "$stuck_ids"
+        printf "<!-- KESSEL-RUN: The following item IDs have failed 3+ consecutive parsecs. Deprioritize them and focus on other failing items: %s -->\n\n" "$stuck_ids"
     fi
     cat "${KESSEL_DIR}/PROMPT.md"
 }
@@ -245,8 +364,17 @@ show_progress() {
     for ((i=0; i<filled; i++)); do filled_str+="█"; done
     for ((i=0; i<empty; i++)); do empty_str+="░"; done
 
-    printf "  ${YELLOW}%s${WHITE}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${YELLOW}%s${RESET}\n" \
-        "$filled_str" "$empty_str" "$passing" "$total" "$pct_label"
+    # No tip cursor at 0% or 100%
+    if [ "$passing" -eq "$total" ]; then
+        printf "  ${GREEN}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${GREEN}%s${RESET}\n" \
+            "$filled_str" "$passing" "$total" "$pct_label"
+    elif [ "$passing" -eq 0 ]; then
+        printf "  ${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${YELLOW}%s${RESET}\n" \
+            "$empty_str" "$passing" "$total" "$pct_label"
+    else
+        printf "  ${YELLOW}%s${WHITE}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${YELLOW}%s${RESET}\n" \
+            "$filled_str" "$empty_str" "$passing" "$total" "$pct_label"
+    fi
 }
 
 show_parsec_header() {
@@ -329,6 +457,10 @@ printf "  ${GREEN}✓${RESET} ${DIM}PRD${RESET}          ${WHITE}docs/specs/PRD.
 printf "  ${GREEN}✓${RESET} ${DIM}Backpressure${RESET} ${WHITE}${KESSEL_DIR}/backpressure.sh${RESET}\n"
 printf "  ${GREEN}✓${RESET} ${DIM}Progress${RESET}     ${WHITE}docs/PROGRESS.md${RESET}\n"
 printf "  ${GREEN}✓${RESET} ${DIM}Model${RESET}        ${WHITE}${KESSEL_MODEL}${RESET}\n"
+if [ "$SKIP_STUCK_THRESHOLD" -gt 0 ]; then
+    printf "  ${GREEN}✓${RESET} ${DIM}Skip stuck${RESET}   ${WHITE}%d+ cycles${RESET}\n" "$SKIP_STUCK_THRESHOLD"
+fi
+printf "  ${DIM}Tip: tail -f %s for a quiet dashboard${RESET}\n" "$LOG_FILE"
 echo ""
 
 # ── Watch mode ───────────────────────────────────────────────────
@@ -413,7 +545,8 @@ while true; do
         printf "  ${WHITE}${BOLD}MAX PARSECS (%d) REACHED${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
             "$MAX_PARSECS" "$(format_duration $((TOTAL_END - TOTAL_START)))"
         show_progress
-        printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        show_run_summary "max"
+        printf "\n  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
         cleanup_state
         break
     fi
@@ -501,13 +634,14 @@ print(math.ceil(${_remaining}/v) if v > 0 else 0)
         _eta_str=$(format_duration "$_eta_secs")
     fi
 
+    _remaining_items=$(( _after_total - _after_passing ))
     echo ""
     if [ "$_items_passed_this" -gt 0 ]; then
-        printf "  ${DIM}── parsec %d done ── %s ── ${GREEN}+%d item(s)${RESET}\n" \
-            "$PARSEC" "$(format_duration $PREV_DURATION)" "$_items_passed_this"
+        printf "  ${DIM}── parsec %d done ── %s ── ${GREEN}+%d item(s)${DIM} ── %d remaining ──${RESET}\n" \
+            "$PARSEC" "$(format_duration $PREV_DURATION)" "$_items_passed_this" "$_remaining_items"
     else
-        printf "  ${DIM}── parsec %d done ── %s ── ${ORANGE}+0 items${RESET}\n" \
-            "$PARSEC" "$(format_duration $PREV_DURATION)"
+        printf "  ${DIM}── parsec %d done ── %s ── ${ORANGE}+0 items${DIM} ── %d remaining ──${RESET}\n" \
+            "$PARSEC" "$(format_duration $PREV_DURATION)" "$_remaining_items"
     fi
 
     # ── Write log line ────────────────────────────────────────────
@@ -580,6 +714,7 @@ print(', '.join(done) if done else 'none')
         printf "  ${WHITE}Parsecs:${RESET} %d    ${WHITE}Time:${RESET} %s\n" \
             "$PARSEC" "$(format_duration $((TOTAL_END - TOTAL_START)))"
         show_progress
+        show_run_summary "complete"
         echo ""
         printf "  ${DIM}\"Great shot kid, that was one in a million!\"${RESET}\n"
         echo ""
