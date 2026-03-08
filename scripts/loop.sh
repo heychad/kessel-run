@@ -152,8 +152,12 @@ for item in items:
     if item.get('passes'):
         specs[spec]['pass'] += 1
 
+import os
 bar_w = 16
+# Use just the filename, not the full path
+name_w = max(len(os.path.basename(s)) for s in specs) + 1
 for spec, counts in sorted(specs.items()):
+    name = os.path.basename(spec)
     p, t = counts['pass'], counts['total']
     pct = p / t if t else 0
     filled = round(pct * bar_w)
@@ -161,12 +165,12 @@ for spec, counts in sorted(specs.items()):
     tip = '\u25b8' if 0 < pct < 1 else ''
     bar = '\u2588' * filled + tip + '\u2591' * empty
     if p == t:
-        status = '\u2713'
+        status = '\033[38;5;114m\u2713\033[0m'
     elif p == 0:
-        status = '\u2014'
+        status = '\033[38;5;240m\u2014\033[0m'
     else:
         status = f'{round(pct*100)}%'
-    print(f'  {spec:<20} {bar}  {p:>3}/{t:<3}  {status}')
+    print(f'  {name:<{name_w}} {bar}  {p:>3}/{t:<3}  {status}')
 " 2>/dev/null || printf "  ${DIM}(spec data unavailable)${RESET}\n"
 }
 
@@ -228,6 +232,11 @@ show_progress() {
     fi
 
     pct=$(( passing * 100 / total ))
+    local pct_label="${pct}%"
+    # Show <1% when items are passing but integer division rounds to 0
+    if [ "$passing" -gt 0 ] && [ "$pct" -eq 0 ]; then
+        pct_label="<1%"
+    fi
     local bar_width=30
     filled=$(( passing * bar_width / total ))
     empty=$(( bar_width - filled ))
@@ -236,8 +245,8 @@ show_progress() {
     for ((i=0; i<filled; i++)); do filled_str+="█"; done
     for ((i=0; i<empty; i++)); do empty_str+="░"; done
 
-    printf "  ${YELLOW}%s${WHITE}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${YELLOW}%d%%${RESET}\n" \
-        "$filled_str" "$empty_str" "$passing" "$total" "$pct"
+    printf "  ${YELLOW}%s${WHITE}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${YELLOW}%s${RESET}\n" \
+        "$filled_str" "$empty_str" "$passing" "$total" "$pct_label"
 }
 
 show_parsec_header() {
@@ -493,7 +502,13 @@ print(math.ceil(${_remaining}/v) if v > 0 else 0)
     fi
 
     echo ""
-    printf "  ${DIM}── parsec %d done ── %s ──${RESET}\n" "$PARSEC" "$(format_duration $PREV_DURATION)"
+    if [ "$_items_passed_this" -gt 0 ]; then
+        printf "  ${DIM}── parsec %d done ── %s ── ${GREEN}+%d item(s)${RESET}\n" \
+            "$PARSEC" "$(format_duration $PREV_DURATION)" "$_items_passed_this"
+    else
+        printf "  ${DIM}── parsec %d done ── %s ── ${ORANGE}+0 items${RESET}\n" \
+            "$PARSEC" "$(format_duration $PREV_DURATION)"
+    fi
 
     # ── Write log line ────────────────────────────────────────────
     write_log_line "$PARSEC" "$_after_passing" "$_after_total" \
@@ -533,7 +548,8 @@ for item in items:
     specs[spec]['total'] += 1
     if item.get('passes'):
         specs[spec]['pass'] += 1
-done = [s for s,c in specs.items() if c['pass']==c['total']]
+import os
+done = [os.path.basename(s) for s,c in specs.items() if c['pass']==c['total']]
 print(', '.join(done) if done else 'none')
 " 2>/dev/null || echo "?")
 
