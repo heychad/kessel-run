@@ -414,17 +414,20 @@ while true; do
 
     # Show velocity/ETA in parsec header (available from parsec 2 onward)
     if [ "$VELOCITY_COUNT" -gt 0 ] && [ "$VELOCITY_SUM" -gt 0 ]; then
-        _display_remaining=$(( $(count_prd_progress | cut -d' ' -f2) - $(count_prd_progress | cut -d' ' -f1) ))
-        _display_vel=$(python3 -c "print(f'{${VELOCITY_SUM}/${VELOCITY_COUNT}:.1f}')")
-        _display_avg_dur=$(( (TOTAL_NOW - TOTAL_START) / VELOCITY_COUNT ))
-        _display_parsecs_rem=$(python3 -c "
+        _disp_progress=$(count_prd_progress)
+        _disp_passing=$(echo "$_disp_progress" | cut -d' ' -f1)
+        _disp_total=$(echo "$_disp_progress" | cut -d' ' -f2)
+        _disp_remaining=$(( _disp_total - _disp_passing ))
+        _disp_vel=$(python3 -c "print(f'{${VELOCITY_SUM}/${VELOCITY_COUNT}:.1f}')")
+        _disp_avg_dur=$(( (TOTAL_NOW - TOTAL_START) / VELOCITY_COUNT ))
+        _disp_parsecs_rem=$(python3 -c "
 import math
 v=${VELOCITY_SUM}/${VELOCITY_COUNT}
-print(math.ceil(${_display_remaining}/v) if v > 0 else 0)
+print(math.ceil(${_disp_remaining}/v) if v > 0 else 0)
 ")
-        _display_eta_secs=$(( _display_parsecs_rem * _display_avg_dur ))
+        _disp_eta_secs=$(( _disp_parsecs_rem * _disp_avg_dur ))
         printf "  ${CYAN}⚡ %s items/parsec  ~%s remaining${RESET}\n\n" \
-            "$_display_vel" "$(format_duration $_display_eta_secs)"
+            "$_disp_vel" "$(format_duration $_disp_eta_secs)"
     fi
 
     # Show stuck warning if any
@@ -514,7 +517,8 @@ print(math.ceil(${_remaining}/v) if v > 0 else 0)
     if [ $(( PARSEC % 10 )) -eq 0 ]; then
         _checkpoint_items_gained=$(( _after_passing - CHECKPOINT_PASSING_PREV ))
         _checkpoint_vel=$(python3 -c "print(f'{${_checkpoint_items_gained}/10:.1f}')" 2>/dev/null || echo "?")
-        _remaining_parsecs=$(( MAX_PARSECS > 0 ? MAX_PARSECS - PARSEC : 0 ))
+        _remaining_parsecs="∞"
+        [ "$MAX_PARSECS" -gt 0 ] && _remaining_parsecs=$(( MAX_PARSECS - PARSEC ))
         _stuck_summary=$([ -f "$STUCK_FILE" ] && awk '$2>=3{printf "#%s(%dx) ", $1, $2}' "$STUCK_FILE" || echo "none")
         _specs_done=$(python3 -c "
 import json
@@ -540,7 +544,7 @@ print(', '.join(done) if done else 'none')
         printf "  ${DIM}Stuck:${RESET}   ${ORANGE}%s${RESET}\n" "$_stuck_summary"
         printf "  ${DIM}Specs done:${RESET} ${GREEN}%s${RESET}\n" "$_specs_done"
         if [ "$VELOCITY_SUM" -gt 0 ]; then
-            printf "  ${DIM}ETA:${RESET}     ${CYAN}~%s (%d parsecs remaining)${RESET}\n" \
+            printf "  ${DIM}ETA:${RESET}     ${CYAN}~%s (%s parsecs remaining)${RESET}\n" \
                 "$_eta_str" "$_remaining_parsecs"
         fi
         echo ""
