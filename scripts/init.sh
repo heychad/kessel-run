@@ -98,6 +98,7 @@ else
 fi
 
 # ── Generate CLAUDE.md ───────────────────────────────────────────
+mkdir -p .claude
 if [ ! -f .claude/CLAUDE.md ]; then
 cat > .claude/CLAUDE.md << 'CLAUDEMD_EOF'
 ## Back Pressure

@@ -47,7 +47,7 @@ CYAN='\033[38;5;117m'
 ORANGE='\033[38;5;208m'
 
 # ── Constants ──────────────────────────────────────────────────
-STUCK_WARN_THRESHOLD=3                 # warn after N consecutive failures
+STUCK_WARN_THRESHOLD="${KESSEL_STUCK_THRESHOLD:-3}"  # warn after N consecutive failures
 STUCK_FILE=".kessel-run-stuck"         # persists across parsecs, gitignored
 STATE_FILE=".kessel-run-state"         # crash-resume state
 LOG_DIR="logs"
@@ -297,6 +297,27 @@ cleanup_state() {
     rm -f "$STATE_FILE"
 }
 
+# Trim PROGRESS.md to last N lines if it grows too large.
+# Keeps the header (first 3 lines) and last KESSEL_PROGRESS_MAX_LINES lines.
+KESSEL_PROGRESS_MAX_LINES="${KESSEL_PROGRESS_MAX_LINES:-500}"
+trim_progress_log() {
+    local file="docs/PROGRESS.md"
+    [ -f "$file" ] || return 0
+    local total_lines
+    total_lines=$(wc -l < "$file" | tr -d ' ')
+    if [ "$total_lines" -gt "$KESSEL_PROGRESS_MAX_LINES" ]; then
+        local header tail_lines
+        header=$(head -3 "$file")
+        tail_lines=$(( KESSEL_PROGRESS_MAX_LINES - 5 ))
+        {
+            echo "$header"
+            echo ""
+            printf "<!-- Trimmed: older entries archived. %d lines kept of %d -->\n\n" "$tail_lines" "$total_lines"
+            tail -"$tail_lines" "$file"
+        } > "${file}.tmp" && mv "${file}.tmp" "$file"
+    fi
+}
+
 # Compose the full prompt, injecting stuck IDs if any.
 build_prompt() {
     if [ "$SKIP_STUCK_THRESHOLD" -gt 0 ]; then
@@ -418,12 +439,27 @@ print_hero
 # ── Pre-flight checks ───────────────────────────────────────────
 PREFLIGHT_OK=true
 
+# Check required commands
+for cmd in python3 claude git; do
+    if ! command -v "$cmd" &>/dev/null; then
+        printf "  ${RED}✗${RESET} Command not found: ${WHITE}%s${RESET}\n" "$cmd"
+        PREFLIGHT_OK=false
+    fi
+done
+
+# Check required files
 for f in "${KESSEL_DIR}/PROMPT.md" docs/specs/PRD.json "${KESSEL_DIR}/backpressure.sh" docs/PROGRESS.md; do
     if [ ! -f "$f" ]; then
         printf "  ${RED}✗${RESET} Missing: ${WHITE}%s${RESET}\n" "$f"
         PREFLIGHT_OK=false
     fi
 done
+
+# Check backpressure.sh is executable
+if [ -f "${KESSEL_DIR}/backpressure.sh" ] && [ ! -x "${KESSEL_DIR}/backpressure.sh" ]; then
+    printf "  ${ORANGE}⚠${RESET} ${WHITE}%s${RESET} is not executable, fixing...\n" "${KESSEL_DIR}/backpressure.sh"
+    chmod +x "${KESSEL_DIR}/backpressure.sh"
+fi
 
 if [ "$PREFLIGHT_OK" = false ]; then
     echo ""
@@ -517,6 +553,9 @@ while true; do
         cleanup_state
         break
     fi
+
+    # Trim PROGRESS.md if it's grown too large (prevents context bloat)
+    trim_progress_log
 
     # Read PRD once for the header — reuse for before-snapshot too
     read_prd_progress
