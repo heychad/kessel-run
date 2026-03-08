@@ -46,32 +46,31 @@ BOLD='\033[1m'
 CYAN='\033[38;5;117m'
 ORANGE='\033[38;5;208m'
 
-# ── Temp / log paths ─────────────────────────────────────────────
-STUCK_FILE=".kessel-run-stuck"      # persists across parsecs, gitignored
-STATE_FILE=".kessel-run-state"      # crash-resume state
+# ── Constants ──────────────────────────────────────────────────
+STUCK_WARN_THRESHOLD=3                 # warn after N consecutive failures
+STUCK_FILE=".kessel-run-stuck"         # persists across parsecs, gitignored
+STATE_FILE=".kessel-run-state"         # crash-resume state
 LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/kessel-run.log"
 
 # ── Cleanup ──────────────────────────────────────────────────────
 cleanup() {
     [ -n "${TIMER_PID:-}" ] && kill "$TIMER_PID" 2>/dev/null
+    TIMER_PID=""
     printf '\033]0;\007'
 }
 
 # Graceful Ctrl+C — show status snapshot before exiting
 handle_interrupt() {
-    # Kill timer first
-    [ -n "${TIMER_PID:-}" ] && kill "$TIMER_PID" 2>/dev/null
-    TIMER_PID=""
-    printf '\033]0;\007'
+    cleanup
 
-    local now=$(date +%s)
-    local elapsed=$((now - ${TOTAL_START:-$now}))
-    local progress
+    local now elapsed progress passing total gained
+    now=$(date +%s)
+    elapsed=$((now - ${TOTAL_START:-$now}))
     progress=$(count_prd_progress 2>/dev/null || echo "? ? ")
-    local passing=$(echo "$progress" | cut -d' ' -f1)
-    local total=$(echo "$progress" | cut -d' ' -f2)
-    local gained=$(( ${passing:-0} - ${TOTAL_ITEMS_PASSED_START:-0} ))
+    passing=${progress%% *}
+    total=$(echo "$progress" | cut -d' ' -f2)
+    gained=$(( ${passing:-0} - ${TOTAL_ITEMS_PASSED_START:-0} ))
     [ "$gained" -lt 0 ] && gained=0
 
     echo ""
@@ -102,9 +101,12 @@ format_duration() {
     fi
 }
 
-count_prd_progress() {
-    python3 -c "
-import json, sys
+# Read PRD progress — sets global PRD_PASSING, PRD_TOTAL, PRD_FAILING_CSV.
+# Call once and reuse, instead of spawning python3 + parsing JSON repeatedly.
+read_prd_progress() {
+    local progress
+    progress=$(python3 -c "
+import json
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
 items = data if isinstance(data, list) else data.get('items', [])
@@ -112,7 +114,10 @@ total = len(items)
 passing = sum(1 for i in items if i.get('passes'))
 failing_ids = [str(i.get('id', idx)) for idx, i in enumerate(items) if not i.get('passes')]
 print(f'{passing} {total} {chr(44).join(failing_ids)}')
-" 2>/dev/null || echo "0 0 "
+" 2>/dev/null || echo "0 0 ")
+    PRD_PASSING=${progress%% *}
+    PRD_TOTAL=$(echo "$progress" | cut -d' ' -f2)
+    PRD_FAILING_CSV=$(echo "$progress" | cut -d' ' -f3)
 }
 
 # Update .kessel-run-stuck with current failing IDs.
@@ -120,7 +125,6 @@ print(f'{passing} {total} {chr(44).join(failing_ids)}')
 update_stuck_file() {
     local failing_csv="$1"   # comma-separated currently-failing IDs (may be empty)
 
-    # Read existing counts into associative array
     declare -A counts
     if [ -f "$STUCK_FILE" ]; then
         while read -r id cnt; do
@@ -128,7 +132,6 @@ update_stuck_file() {
         done < "$STUCK_FILE"
     fi
 
-    # Parse currently failing IDs
     declare -A currently_failing
     if [ -n "$failing_csv" ]; then
         IFS=',' read -ra fids <<< "$failing_csv"
@@ -137,50 +140,45 @@ update_stuck_file() {
         done
     fi
 
-    # Increment failing, reset passing
     declare -A new_counts
-    # Carry forward all known IDs that are still failing
     for id in "${!counts[@]}"; do
         if [ -n "${currently_failing[$id]:-}" ]; then
             new_counts["$id"]=$(( counts[$id] + 1 ))
         fi
-        # IDs that are now passing just drop out (not written back)
     done
-    # Add new failing IDs not seen before
     for id in "${!currently_failing[@]}"; do
         if [ -z "${counts[$id]:-}" ]; then
             new_counts["$id"]=1
         fi
     done
 
-    # Write back
     : > "$STUCK_FILE"
     for id in "${!new_counts[@]}"; do
         echo "$id ${new_counts[$id]}" >> "$STUCK_FILE"
     done
 }
 
-# Returns warning line if any item has failed 3+ consecutive parsecs.
+# Returns warning line if any item has failed STUCK_WARN_THRESHOLD+ consecutive parsecs.
 get_stuck_warning() {
     [ -f "$STUCK_FILE" ] || return 0
     local stuck_ids=()
     while read -r id cnt; do
-        if [ "$cnt" -ge 3 ]; then
+        if [ "$cnt" -ge "$STUCK_WARN_THRESHOLD" ]; then
             stuck_ids+=("#${id}(${cnt}x)")
         fi
     done < "$STUCK_FILE"
     if [ "${#stuck_ids[@]}" -gt 0 ]; then
         local joined
         joined=$(IFS=', '; echo "${stuck_ids[*]}")
-        printf "${ORANGE}⚠ %d stuck item(s): %s (failed 3+ cycles)${RESET}" \
-            "${#stuck_ids[@]}" "$joined"
+        printf "${ORANGE}⚠ %d stuck item(s): %s (failed %d+ cycles)${RESET}" \
+            "${#stuck_ids[@]}" "$joined" "$STUCK_WARN_THRESHOLD"
     fi
 }
 
-# Returns comma-separated IDs of stuck items (3+ failures) for prompt injection.
+# Returns comma-separated IDs of stuck items at given threshold.
 get_stuck_ids_for_prompt() {
     [ -f "$STUCK_FILE" ] || return 0
-    local threshold=${1:-3}
+    local threshold=${1:-$STUCK_WARN_THRESHOLD}
     local ids=()
     while read -r id cnt; do
         [ "$cnt" -ge "$threshold" ] && ids+=("$id")
@@ -191,13 +189,12 @@ get_stuck_ids_for_prompt() {
 # Show spec-level progress table.
 show_spec_progress() {
     python3 -c "
-import json, sys
+import json, os
 
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
 items = data if isinstance(data, list) else data.get('items', [])
 
-# Group by spec field
 specs = {}
 for item in items:
     spec = item.get('spec', 'unknown')
@@ -207,9 +204,7 @@ for item in items:
     if item.get('passes'):
         specs[spec]['pass'] += 1
 
-import os
 bar_w = 16
-# Use just the filename, not the full path
 name_w = max(len(os.path.basename(s)) for s in specs) + 1
 for spec, counts in sorted(specs.items()):
     name = os.path.basename(spec)
@@ -218,7 +213,6 @@ for spec, counts in sorted(specs.items()):
     filled = round(pct * bar_w)
     empty = bar_w - filled
     if 0 < p < t:
-        # In progress: filled + tip + empty (tip takes 1 from empty)
         empty = max(0, empty - 1)
         bar = '\u2588' * filled + '\u25b8' + '\u2591' * empty
     else:
@@ -233,37 +227,26 @@ for spec, counts in sorted(specs.items()):
 " 2>/dev/null || printf "  ${DIM}(spec data unavailable)${RESET}\n"
 }
 
-# End-of-run summary: hardest items and still-stuck items.
+# End-of-run summary: hardest items and still-stuck items (single PRD read).
 show_run_summary() {
-    local run_outcome="$1"  # "complete" or "max" or "interrupted"
+    local run_outcome="$1"  # "complete" or "max"
 
-    # Show still-failing items
-    local failing_count
-    failing_count=$(python3 -c "
-import json
-with open('docs/specs/PRD.json') as f:
-    data = json.load(f)
-items = data if isinstance(data, list) else data.get('items', [])
-failing = [i for i in items if not i.get('passes')]
-print(len(failing))
-" 2>/dev/null || echo "0")
-
-    if [ "$failing_count" -gt 0 ] && [ "$run_outcome" != "complete" ]; then
-        printf "\n  ${WHITE}${BOLD}Still failing (%d):${RESET}\n" "$failing_count"
+    if [ "$run_outcome" != "complete" ]; then
         python3 -c "
 import json
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
 items = data if isinstance(data, list) else data.get('items', [])
 failing = [(i.get('id','?'), i.get('description','')[:60]) for i in items if not i.get('passes')]
-for fid, desc in failing[:15]:
-    print(f'    \033[38;5;203m#{fid}\033[0m {desc}')
-if len(failing) > 15:
-    print(f'    \033[38;5;240m... and {len(failing)-15} more\033[0m')
+if failing:
+    print(f'\n  \033[1;37m\033[1mStill failing ({len(failing)}):\033[0m')
+    for fid, desc in failing[:15]:
+        print(f'    \033[38;5;203m#{fid}\033[0m {desc}')
+    if len(failing) > 15:
+        print(f'    \033[38;5;240m... and {len(failing)-15} more\033[0m')
 " 2>/dev/null
     fi
 
-    # Show hardest items (most cycles in stuck file)
     if [ -f "$STUCK_FILE" ] && [ -s "$STUCK_FILE" ]; then
         local hardest
         hardest=$(sort -t' ' -k2 -rn "$STUCK_FILE" | head -5)
@@ -275,7 +258,6 @@ if len(failing) > 15:
         fi
     fi
 
-    # Show log file location
     if [ -f "$LOG_FILE" ]; then
         local log_lines
         log_lines=$(wc -l < "$LOG_FILE" | tr -d ' ')
@@ -288,10 +270,8 @@ write_log_line() {
     local parsec=$1 passing=$2 total=$3 duration=$4 vel_str=$5 \
           attempted=$6 passed_this=$7 stuck_ids=$8
 
-    mkdir -p "$LOG_DIR"
-    local ts
+    local ts stuck_field=""
     ts=$(date -u '+%Y-%m-%dT%H:%M:%S')
-    local stuck_field=""
     [ -n "$stuck_ids" ] && stuck_field=" stuck=#${stuck_ids//,/,#}"
     echo "${ts} parsec=${parsec} passed=${passing} total=${total} duration=${duration}s velocity=${vel_str} items_attempted=${attempted} items_passed=${passed_this}${stuck_field}" \
         >> "$LOG_FILE"
@@ -299,12 +279,10 @@ write_log_line() {
 
 # Crash-resume state helpers.
 write_state() {
-    local parsec=$1 start=$2
-    printf "parsec=%d\nstart=%d\n" "$parsec" "$start" > "$STATE_FILE"
+    printf "parsec=%d\nstart=%d\n" "$1" "$2" > "$STATE_FILE"
 }
 
 read_state() {
-    # Prints: PARSEC START (two integers on one line)
     if [ -f "$STATE_FILE" ]; then
         local p s
         p=$(grep '^parsec=' "$STATE_FILE" | cut -d= -f2)
@@ -321,7 +299,6 @@ cleanup_state() {
 
 # Compose the full prompt, injecting stuck IDs if any.
 build_prompt() {
-    # --skip-stuck: completely exclude items stuck beyond threshold
     if [ "$SKIP_STUCK_THRESHOLD" -gt 0 ]; then
         local skip_ids
         skip_ids=$(get_stuck_ids_for_prompt "$SKIP_STUCK_THRESHOLD")
@@ -330,41 +307,36 @@ build_prompt() {
                 "$SKIP_STUCK_THRESHOLD" "$skip_ids"
         fi
     fi
-    # Soft deprioritize items stuck 3+ cycles (even if below skip threshold)
     local stuck_ids
-    stuck_ids=$(get_stuck_ids_for_prompt 3)
+    stuck_ids=$(get_stuck_ids_for_prompt "$STUCK_WARN_THRESHOLD")
     if [ -n "$stuck_ids" ]; then
-        printf "<!-- KESSEL-RUN: The following item IDs have failed 3+ consecutive parsecs. Deprioritize them and focus on other failing items: %s -->\n\n" "$stuck_ids"
+        printf "<!-- KESSEL-RUN: The following item IDs have failed %d+ consecutive parsecs. Deprioritize them and focus on other failing items: %s -->\n\n" \
+            "$STUCK_WARN_THRESHOLD" "$stuck_ids"
     fi
     cat "${KESSEL_DIR}/PROMPT.md"
 }
 
-show_progress() {
-    local progress passing total pct filled empty i filled_str empty_str
-    progress=$(count_prd_progress)
-    passing=$(echo "$progress" | cut -d' ' -f1)
-    total=$(echo "$progress" | cut -d' ' -f2)
-
+# Render progress bar from PRD_PASSING/PRD_TOTAL globals (no extra reads).
+show_progress_from_cache() {
+    local passing=${PRD_PASSING:-0} total=${PRD_TOTAL:-0}
     if [ "$total" -eq 0 ]; then
         printf "  ${DIM}No PRD items found${RESET}\n"
         return
     fi
 
-    pct=$(( passing * 100 / total ))
+    local pct=$(( passing * 100 / total ))
     local pct_label="${pct}%"
-    # Show <1% when items are passing but integer division rounds to 0
     if [ "$passing" -gt 0 ] && [ "$pct" -eq 0 ]; then
         pct_label="<1%"
     fi
     local bar_width=30
-    filled=$(( passing * bar_width / total ))
-    empty=$(( bar_width - filled ))
+    local filled=$(( passing * bar_width / total ))
+    local empty=$(( bar_width - filled ))
 
-    filled_str="" ; empty_str=""
-    for ((i=0; i<filled; i++)); do filled_str+="█"; done
-    for ((i=0; i<empty; i++)); do empty_str+="░"; done
+    local filled_str empty_str
+    printf -v filled_str '%*s' "$filled" '' ; filled_str="${filled_str// /█}"
+    printf -v empty_str '%*s' "$empty" '' ; empty_str="${empty_str// /░}"
 
-    # No tip cursor at 0% or 100%
     if [ "$passing" -eq "$total" ]; then
         printf "  ${GREEN}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${GREEN}%s${RESET}\n" \
             "$filled_str" "$passing" "$total" "$pct_label"
@@ -375,6 +347,12 @@ show_progress() {
         printf "  ${YELLOW}%s${WHITE}▸${DIM}%s${RESET}  ${WHITE}%d${DIM}/${WHITE}%d${RESET} items  ${YELLOW}%s${RESET}\n" \
             "$filled_str" "$empty_str" "$passing" "$total" "$pct_label"
     fi
+}
+
+# Read-then-display progress (for standalone calls outside the loop).
+show_progress() {
+    read_prd_progress
+    show_progress_from_cache
 }
 
 show_parsec_header() {
@@ -389,7 +367,8 @@ show_parsec_header() {
     else
         printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}  ${DIM}%s${RESET}\n" "$parsec" "$time_now"
     fi
-    show_progress
+    # Uses PRD_PASSING/PRD_TOTAL already set by caller
+    show_progress_from_cache
     echo ""
 }
 
@@ -475,19 +454,6 @@ if [ "${1:-}" = "watch" ]; then
     exit 0
 fi
 
-# ── Completion check ─────────────────────────────────────────────
-check_all_complete() {
-    python3 -c "
-import json, sys
-with open('docs/specs/PRD.json') as f:
-    data = json.load(f)
-items = data if isinstance(data, list) else data.get('items', [])
-if not items:
-    sys.exit(1)
-sys.exit(0 if all(i.get('passes') for i in items) else 1)
-" 2>/dev/null
-}
-
 # ── Crash-resume: detect existing state ──────────────────────────
 _state=$(read_state)
 _resume_parsec=$(echo "$_state" | cut -d' ' -f1)
@@ -500,34 +466,35 @@ if [ "$_resume_parsec" -gt 0 ]; then
 else
     PARSEC=0
     TOTAL_START=$(date +%s)
-    # Fresh start: reset stuck file so stale data from prior run doesn't linger
     rm -f "$STUCK_FILE"
 fi
 
 PREV_DURATION=0
 VELOCITY_SUM=0
 VELOCITY_COUNT=0
+_vel_str="0.0"
+_eta_str="unknown"
 
 # ── Auto-scale max parsecs ───────────────────────────────────────
-_prd_total=$(count_prd_progress | cut -d' ' -f2)
-_auto_max=$(python3 -c "import math; print(max(12, math.ceil(${_prd_total} * 1.5)))")
+read_prd_progress
+_auto_max=$(( (PRD_TOTAL * 3 + 1) / 2 ))
+[ "$_auto_max" -lt 12 ] && _auto_max=12
 MAX_PARSECS="${1:-${KESSEL_MAX_PARSECS:-${_auto_max}}}"
 
 printf "  ${DIM}Max parsecs:${RESET} ${WHITE}%s${RESET} ${DIM}(auto: ceil(%d × 1.5) = %d; 0 = unlimited)${RESET}\n" \
-    "$MAX_PARSECS" "$_prd_total" "$_auto_max"
+    "$MAX_PARSECS" "$PRD_TOTAL" "$_auto_max"
 
-# Capture initial passing count for velocity baseline
-_init_progress=$(count_prd_progress)
-TOTAL_ITEMS_PASSED_START=$(echo "$_init_progress" | cut -d' ' -f1)
-PREV_PASSING=$TOTAL_ITEMS_PASSED_START
+TOTAL_ITEMS_PASSED_START=$PRD_PASSING
+PREV_PASSING=$PRD_PASSING
+CHECKPOINT_PASSING_PREV=$PRD_PASSING
 
-# On crash-resume: initialize checkpoint baseline from current PRD state
-CHECKPOINT_PASSING_PREV=$PREV_PASSING
-
-show_progress
+show_progress_from_cache
 echo ""
 
-# Milestone tracking — space-separated list of already-sent percents
+# Create log dir once (not per iteration)
+mkdir -p "$LOG_DIR"
+
+# Milestone tracking — values 25/50/75 are safe for substring matching
 MILESTONES_SENT=""
 
 # ── Main loop ────────────────────────────────────────────────────
@@ -535,41 +502,33 @@ while true; do
     PARSEC=$((PARSEC + 1))
     CYCLE_START=$(date +%s)
 
-    # Write crash-resume state at start of each parsec
     write_state "$PARSEC" "$TOTAL_START"
 
     if [ "$MAX_PARSECS" -gt 0 ] && [ "$PARSEC" -gt "$MAX_PARSECS" ]; then
         TOTAL_END=$(date +%s)
+        read_prd_progress
         echo ""
         printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
         printf "  ${WHITE}${BOLD}MAX PARSECS (%d) REACHED${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
             "$MAX_PARSECS" "$(format_duration $((TOTAL_END - TOTAL_START)))"
-        show_progress
+        show_progress_from_cache
         show_run_summary "max"
         printf "\n  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
         cleanup_state
         break
     fi
 
+    # Read PRD once for the header — reuse for before-snapshot too
+    read_prd_progress
+    _before_passing=$PRD_PASSING
+
     TOTAL_NOW=$(date +%s)
     show_parsec_header "$PARSEC" "$PREV_DURATION" "$((TOTAL_NOW - TOTAL_START))"
 
-    # Show velocity/ETA in parsec header (available from parsec 2 onward)
-    if [ "$VELOCITY_COUNT" -gt 0 ] && [ "$VELOCITY_SUM" -gt 0 ]; then
-        _disp_progress=$(count_prd_progress)
-        _disp_passing=$(echo "$_disp_progress" | cut -d' ' -f1)
-        _disp_total=$(echo "$_disp_progress" | cut -d' ' -f2)
-        _disp_remaining=$(( _disp_total - _disp_passing ))
-        _disp_vel=$(python3 -c "print(f'{${VELOCITY_SUM}/${VELOCITY_COUNT}:.1f}')")
-        _disp_avg_dur=$(( (TOTAL_NOW - TOTAL_START) / VELOCITY_COUNT ))
-        _disp_parsecs_rem=$(python3 -c "
-import math
-v=${VELOCITY_SUM}/${VELOCITY_COUNT}
-print(math.ceil(${_disp_remaining}/v) if v > 0 else 0)
-")
-        _disp_eta_secs=$(( _disp_parsecs_rem * _disp_avg_dur ))
+    # Show velocity/ETA from previous iteration's computation (data hasn't changed)
+    if [ "$VELOCITY_COUNT" -gt 0 ] && [ "$_vel_str" != "0.0" ]; then
         printf "  ${CYAN}⚡ %s items/parsec  ~%s remaining${RESET}\n\n" \
-            "$_disp_vel" "$(format_duration $_disp_eta_secs)"
+            "$_vel_str" "$_eta_str"
     fi
 
     # Show stuck warning if any
@@ -579,10 +538,6 @@ print(math.ceil(${_disp_remaining}/v) if v > 0 else 0)
     # Live timer in terminal title bar
     start_timer "$PARSEC" "$CYCLE_START" &
     TIMER_PID=$!
-
-    # Capture passing count BEFORE this parsec
-    _before_progress=$(count_prd_progress)
-    _before_passing=$(echo "$_before_progress" | cut -d' ' -f1)
 
     # Clean git staging area — prevent committing stale staged files
     git reset --quiet HEAD -- . 2>/dev/null || true
@@ -601,35 +556,28 @@ print(math.ceil(${_disp_remaining}/v) if v > 0 else 0)
     CYCLE_END=$(date +%s)
     PREV_DURATION=$((CYCLE_END - CYCLE_START))
 
-    # ── Post-parsec metrics ───────────────────────────────────────
-    _after_progress=$(count_prd_progress)
-    _after_passing=$(echo "$_after_progress" | cut -d' ' -f1)
-    _after_total=$(echo "$_after_progress" | cut -d' ' -f2)
-    _after_failing=$(echo "$_after_progress" | cut -d' ' -f3)
+    # ── Post-parsec metrics (single PRD read) ──────────────────────
+    read_prd_progress
+    _after_passing=$PRD_PASSING
+    _after_total=$PRD_TOTAL
 
     _items_passed_this=$(( _after_passing - _before_passing ))
-    # Clamp to 0 in case of regression
     [ "$_items_passed_this" -lt 0 ] && _items_passed_this=0
 
-    # Update stuck file
-    update_stuck_file "$_after_failing"
+    update_stuck_file "$PRD_FAILING_CSV"
     _stuck_ids_log=$(get_stuck_ids_for_prompt)
 
-    # Compute velocity and ETA
+    # Compute velocity and ETA (awk instead of python3 for simple math)
     VELOCITY_SUM=$(( VELOCITY_SUM + _items_passed_this ))
     VELOCITY_COUNT=$(( VELOCITY_COUNT + 1 ))
 
     _vel_str="0.0"
     _eta_str="unknown"
-    if [ "$VELOCITY_SUM" -gt 0 ] && [ "$VELOCITY_COUNT" -gt 0 ]; then
-        _vel_str=$(python3 -c "print(f'{${VELOCITY_SUM}/${VELOCITY_COUNT}:.1f}')")
+    if [ "$VELOCITY_SUM" -gt 0 ]; then
         _remaining=$(( _after_total - _after_passing ))
         _avg_dur=$(( (CYCLE_END - TOTAL_START) / VELOCITY_COUNT ))
-        _parsecs_rem=$(python3 -c "
-import math
-v=${VELOCITY_SUM}/${VELOCITY_COUNT}
-print(math.ceil(${_remaining}/v) if v > 0 else 0)
-")
+        _vel_str=$(awk "BEGIN{printf \"%.1f\", ${VELOCITY_SUM}/${VELOCITY_COUNT}}")
+        _parsecs_rem=$(awk "BEGIN{v=${VELOCITY_SUM}/${VELOCITY_COUNT}; print (v>0) ? int(${_remaining}/v + 0.999) : 0}")
         _eta_secs=$(( _parsecs_rem * _avg_dur ))
         _eta_str=$(format_duration "$_eta_secs")
     fi
@@ -655,9 +603,9 @@ print(math.ceil(${_remaining}/v) if v > 0 else 0)
     if command -v osascript &>/dev/null && [ "$_after_total" -gt 0 ]; then
         _pct_now=$(( _after_passing * 100 / _after_total ))
         for _ms in 25 50 75; do
-            if [ "$_pct_now" -ge "$_ms" ] && [[ "$MILESTONES_SENT" != *"$_ms"* ]]; then
+            if [ "$_pct_now" -ge "$_ms" ] && [[ "$MILESTONES_SENT" != *" $_ms "* ]]; then
                 osascript -e "display notification \"${_after_passing}/${_after_total} items passing (${_pct_now}%)\" with title \"Kessel Run — ${_ms}% milestone\"" 2>/dev/null || true
-                MILESTONES_SENT="${MILESTONES_SENT} ${_ms}"
+                MILESTONES_SENT="${MILESTONES_SENT} ${_ms} "
             fi
         done
     fi
@@ -665,12 +613,12 @@ print(math.ceil(${_remaining}/v) if v > 0 else 0)
     # ── Checkpoint every 10 parsecs ───────────────────────────────
     if [ $(( PARSEC % 10 )) -eq 0 ]; then
         _checkpoint_items_gained=$(( _after_passing - CHECKPOINT_PASSING_PREV ))
-        _checkpoint_vel=$(python3 -c "print(f'{${_checkpoint_items_gained}/10:.1f}')" 2>/dev/null || echo "?")
+        _checkpoint_vel=$(awk "BEGIN{printf \"%.1f\", ${_checkpoint_items_gained}/10}")
         _remaining_parsecs="∞"
         [ "$MAX_PARSECS" -gt 0 ] && _remaining_parsecs=$(( MAX_PARSECS - PARSEC ))
-        _stuck_summary=$([ -f "$STUCK_FILE" ] && awk '$2>=3{printf "#%s(%dx) ", $1, $2}' "$STUCK_FILE" || echo "none")
+        _stuck_summary=$([ -f "$STUCK_FILE" ] && awk -v t="$STUCK_WARN_THRESHOLD" '$2>=t{printf "#%s(%dx) ", $1, $2}' "$STUCK_FILE" || echo "none")
         _specs_done=$(python3 -c "
-import json
+import json, os
 with open('docs/specs/PRD.json') as f:
     data = json.load(f)
 items = data if isinstance(data, list) else data.get('items', [])
@@ -682,7 +630,6 @@ for item in items:
     specs[spec]['total'] += 1
     if item.get('passes'):
         specs[spec]['pass'] += 1
-import os
 done = [os.path.basename(s) for s,c in specs.items() if c['pass']==c['total']]
 print(', '.join(done) if done else 'none')
 " 2>/dev/null || echo "?")
@@ -703,8 +650,8 @@ print(', '.join(done) if done else 'none')
         CHECKPOINT_PASSING_PREV=$_after_passing
     fi
 
-    # ── Completion check ──────────────────────────────────────────
-    if check_all_complete; then
+    # ── Completion check (inline — no extra PRD read) ──────────────
+    if [ "$_after_passing" -eq "$_after_total" ] && [ "$_after_total" -gt 0 ]; then
         TOTAL_END=$(date +%s)
         echo ""
         printf "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
@@ -713,7 +660,7 @@ print(', '.join(done) if done else 'none')
         echo ""
         printf "  ${WHITE}Parsecs:${RESET} %d    ${WHITE}Time:${RESET} %s\n" \
             "$PARSEC" "$(format_duration $((TOTAL_END - TOTAL_START)))"
-        show_progress
+        show_progress_from_cache
         show_run_summary "complete"
         echo ""
         printf "  ${DIM}\"Great shot kid, that was one in a million!\"${RESET}\n"
