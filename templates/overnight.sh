@@ -96,18 +96,10 @@ EOF
 log "Digest: $DIGEST"
 
 # ── Run each batch, tracking pids ─────────────────────────────────
-declare -a PIDS
-declare -a BATCH_OF_PID
-declare -a LOG_OF_PID
-
-run_batch() {
-    local batch="$1"
-    local batch_log="logs/batch-${batch}-$(date +%H%M%S).log"
-    bash "$KESSEL_DIR/run-issue.sh" --batch "$batch" > "$batch_log" 2>&1
-    local rc=$?
-    echo "$rc" > "$batch_log.exit"
-    echo "$batch_log"
-}
+# Arrays live in parent shell — the driver loop uses process substitution
+# (not a pipe) so PIDS+=() mutations persist across iterations.
+declare -a PIDS=()
+declare -a BATCH_LOGS=()  # this-run logs only, used for digest assembly
 
 wait_for_slot() {
     while [ "${#PIDS[@]}" -ge "$PARALLEL" ]; do
@@ -115,27 +107,25 @@ wait_for_slot() {
             if ! kill -0 "${PIDS[$i]}" 2>/dev/null; then
                 wait "${PIDS[$i]}" 2>/dev/null || true
                 unset 'PIDS[i]'
-                unset 'BATCH_OF_PID[i]'
-                unset 'LOG_OF_PID[i]'
             fi
         done
         PIDS=("${PIDS[@]+"${PIDS[@]}"}")
-        BATCH_OF_PID=("${BATCH_OF_PID[@]+"${BATCH_OF_PID[@]}"}")
-        LOG_OF_PID=("${LOG_OF_PID[@]+"${LOG_OF_PID[@]}"}")
-        [ "${#PIDS[@]}" -ge "$PARALLEL" ] && sleep 5
+        if [ "${#PIDS[@]}" -ge "$PARALLEL" ]; then
+            sleep 2
+        fi
     done
+    return 0
 }
 
-echo "$BATCHES" | while read -r batch; do
+while read -r batch; do
     [ -z "$batch" ] && continue
     wait_for_slot
     log "▶ Launching batch ${BOLD}$batch${RESET}"
-    batch_log="logs/batch-${batch}-$(date +%H%M%S).log"
+    batch_log="logs/batch-${batch}-$(date +%Y%m%d-%H%M%S).log"
+    BATCH_LOGS+=("$batch_log")
     ( bash "$KESSEL_DIR/run-issue.sh" --batch "$batch" > "$batch_log" 2>&1; echo $? > "$batch_log.exit" ) &
     PIDS+=($!)
-    BATCH_OF_PID+=("$batch")
-    LOG_OF_PID+=("$batch_log")
-done
+done < <(echo "$BATCHES")
 
 # ── Wait for all remaining ────────────────────────────────────────
 log "Waiting for all batches to complete..."
@@ -149,7 +139,7 @@ GREEN_COUNT=0
 STUCK_COUNT=0
 FAIL_COUNT=0
 
-for batch_log in logs/batch-*.log; do
+for batch_log in "${BATCH_LOGS[@]}"; do
     [ -f "$batch_log" ] || continue
     [ -f "$batch_log.exit" ] || continue
     exit_code=$(cat "$batch_log.exit")

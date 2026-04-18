@@ -99,17 +99,19 @@ ITEM_COUNT=$(echo "$FILTERED_PRD" | jq '.items | length')
 log "Filtered PRD: $ITEM_COUNT items for issues $ISSUES"
 
 # ── Branch + worktree naming ──────────────────────────────────────
+# Always fetch the first issue's title — used for PR title and
+# (in non-batch mode) the slug. Default to "issue" if gh lookup fails.
+FIRST_ISSUE="${ISSUE_ARR[0]}"
+TITLE=$(gh issue view "$FIRST_ISSUE" --json title -q .title 2>/dev/null || echo "issue")
+
 if [ -n "$BATCH_NAME" ]; then
-    SLUG="batch-${BATCH_NAME,,}"
+    SLUG="batch-$(echo "$BATCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g')"
 else
-    # First issue title, slugified
-    FIRST_ISSUE="${ISSUE_ARR[0]}"
-    TITLE=$(gh issue view "$FIRST_ISSUE" --json title -q .title 2>/dev/null || echo "issue")
-    SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g' | cut -c1-40)
+    title_slug=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g' | cut -c1-40)
     if [ ${#ISSUE_ARR[@]} -gt 1 ]; then
-        SLUG="issues-$(IFS=-; echo "${ISSUE_ARR[*]}")-${SLUG}"
+        SLUG="issues-$(IFS=-; echo "${ISSUE_ARR[*]}")-${title_slug}"
     else
-        SLUG="issue-${FIRST_ISSUE}-${SLUG}"
+        SLUG="issue-${FIRST_ISSUE}-${title_slug}"
     fi
 fi
 
@@ -131,7 +133,16 @@ mkdir -p "$(dirname "$WORKTREE")"
 git worktree add -b "$BRANCH" "$WORKTREE" "$PR_BASE" >/dev/null
 ok "Worktree created at $WORKTREE"
 
+# Preflight: the worktree checkout must have the kessel-run scripts committed,
+# otherwise loop.sh won't be found. This catches the common "I scaffolded but
+# didn't commit yet" footgun with a clear message.
+if [ ! -x "$WORKTREE/$KESSEL_DIR/loop.sh" ]; then
+    git worktree remove "$WORKTREE" --force 2>/dev/null || true
+    die "$KESSEL_DIR/loop.sh missing in worktree — commit kessel-run scripts on $PR_BASE first"
+fi
+
 # ── Write filtered PRD inside worktree ────────────────────────────
+mkdir -p "$(dirname "$WORKTREE/$PRD_PATH")"
 echo "$FILTERED_PRD" > "$WORKTREE/$PRD_PATH"
 log "Wrote filtered PRD to $WORKTREE/$PRD_PATH"
 
@@ -181,8 +192,13 @@ $PROGRESS_TAIL
 EOF
 )
 
-    PR_TITLE="${ISSUE_ARR[0]:+#${ISSUE_ARR[0]}: }$(echo "$TITLE" | head -c 70)"
-    [ ${#ISSUE_ARR[@]} -gt 1 ] && PR_TITLE="batch ${BATCH_NAME:-$SLUG}: $ITEM_COUNT issues"
+    if [ -n "$BATCH_NAME" ]; then
+        PR_TITLE="batch $BATCH_NAME: ${#ISSUE_ARR[@]} issue(s), $ITEM_COUNT items"
+    elif [ ${#ISSUE_ARR[@]} -eq 1 ]; then
+        PR_TITLE="#${ISSUE_ARR[0]}: $(echo "$TITLE" | head -c 70)"
+    else
+        PR_TITLE="#${ISSUE_ARR[0]} + ${#ISSUE_ARR[@]}-issue batch: $ITEM_COUNT items"
+    fi
 
     PR_URL=$(cd "$WORKTREE" && gh pr create \
         --title "$PR_TITLE" \

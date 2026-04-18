@@ -8,7 +8,13 @@
 set -euo pipefail
 
 FORCE=false
-[ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ] && FORCE=true
+ISSUE_MODE=false
+for arg in "$@"; do
+    case "$arg" in
+        --force|-f)     FORCE=true ;;
+        --issue-mode)   ISSUE_MODE=true ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KESSEL_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -128,6 +134,25 @@ else
     echo ".claude/worktrees/" >> .gitignore
     echo ".kessel-locks/" >> .gitignore
     echo "  + .gitignore created (.claude/worktrees/, .kessel-locks/)"
+fi
+
+# ── Issue-mode scripts (opt-in via --issue-mode or via plan-sprint) ───
+if [ "$ISSUE_MODE" = true ]; then
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "  ⚠ jq not found — required for issue-mode scripts. Install: brew install jq"
+    fi
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "  ⚠ gh not found — required for issue-mode scripts. Install: brew install gh"
+    fi
+    for script in run-issue.sh overnight.sh morning-digest.sh; do
+        if [ ! -f "scripts/kessel-run/$script" ] || [ "$FORCE" = true ]; then
+            cp "$KESSEL_ROOT/templates/$script" "scripts/kessel-run/$script"
+            chmod +x "scripts/kessel-run/$script"
+            echo "  + scripts/kessel-run/$script"
+        else
+            echo "  ~ scripts/kessel-run/$script (exists, use --force to update)"
+        fi
+    done
 fi
 
 # ── Next steps ─────────────────────────────────────────────────────
