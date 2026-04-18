@@ -87,9 +87,8 @@ IFS=',' read -ra ISSUE_ARR <<< "$ISSUES"
 [ ${#ISSUE_ARR[@]} -eq 0 ] && die "No issues to process"
 
 # ── Filter PRD to matching items ──────────────────────────────────
-# jq produces a PRD.json containing only items whose github_issue is in the list,
-# with IDs renumbered starting at 1 so loop.sh works cleanly.
-FILTERED_PRD=$(jq --argjson issues "$(printf '%s\n' "${ISSUE_ARR[@]}" | jq -R 'tonumber' | jq -s .)" '
+# Renumber IDs starting at 1 so loop.sh works cleanly inside the worktree.
+FILTERED_PRD=$(jq --argjson issues "$(printf '%s\n' "${ISSUE_ARR[@]}" | jq -Rn '[inputs | tonumber]')" '
     .items |= ([.[] | select(.github_issue != null and (.github_issue | IN($issues[])))] |
         to_entries | map(.value + {id: (.key + 1)}))
 ' "$PRD_PATH")
@@ -99,8 +98,6 @@ ITEM_COUNT=$(echo "$FILTERED_PRD" | jq '.items | length')
 log "Filtered PRD: $ITEM_COUNT items for issues $ISSUES"
 
 # ── Branch + worktree naming ──────────────────────────────────────
-# Always fetch the first issue's title — used for PR title and
-# (in non-batch mode) the slug. Default to "issue" if gh lookup fails.
 FIRST_ISSUE="${ISSUE_ARR[0]}"
 TITLE=$(gh issue view "$FIRST_ISSUE" --json title -q .title 2>/dev/null || echo "issue")
 
@@ -128,9 +125,9 @@ if [ "$DRY_RUN" = true ]; then
 fi
 
 # ── Create worktree ───────────────────────────────────────────────
-[ -d "$WORKTREE" ] && die "Worktree already exists: $WORKTREE (remove with 'git worktree remove $WORKTREE')"
 mkdir -p "$(dirname "$WORKTREE")"
-git worktree add -b "$BRANCH" "$WORKTREE" "$PR_BASE" >/dev/null
+git worktree add -b "$BRANCH" "$WORKTREE" "$PR_BASE" >/dev/null 2>&1 \
+    || die "Worktree creation failed — $WORKTREE may already exist, or branch $BRANCH may be taken"
 ok "Worktree created at $WORKTREE"
 
 # Preflight: the worktree checkout must have the kessel-run scripts committed,
@@ -166,9 +163,7 @@ ISSUES_CLOSES=$(printf 'Closes #%s\n' "${ISSUE_ARR[@]}")
 ITEMS_SUMMARY=$(jq -r '.items[] | "- [" + (if .passes then "x" else " " end) + "] #" + (.github_issue|tostring) + ": " + .description' "$WORKTREE/$PRD_PATH")
 PROGRESS_TAIL=$(tail -60 "$WORKTREE/docs/PROGRESS.md" 2>/dev/null || echo "(no progress log)")
 
-# Manual verification plan (investigate skill Step 6 format) — give reviewers
-# a concrete checklist instead of just a diff to eyeball. One "Test" per item,
-# derived from the item's user-visible description + spec reference.
+# Manual verification plan (format borrowed from /investigate Step 6).
 MANUAL_VERIFY=$(jq -r '
   .items
   | to_entries

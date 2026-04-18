@@ -49,6 +49,14 @@ RESET='\033[0m'
 log() { printf "${CYAN}[overnight]${RESET} %s\n" "$*"; }
 die() { printf "${RED}[overnight]${RESET} %s\n" "$*" >&2; exit 1; }
 
+# min(batch_wave where passes != true AND batch_wave > floor). Empty if none.
+next_incomplete_wave() {
+    local floor="${1:-0}"
+    jq -r --argjson floor "$floor" '
+        [.items[] | select(.passes != true) | (.batch_wave // 1) | select(. > $floor)] | min // empty
+    ' "$PRD_PATH"
+}
+
 # ── Prerequisites ─────────────────────────────────────────────────
 command -v jq >/dev/null || die "jq not installed"
 [ -f "$PRD_PATH" ] || die "PRD not found at $PRD_PATH"
@@ -70,20 +78,13 @@ if [ -n "$ONLY_BATCHES" ]; then
         fi
     done
     BATCHES=$(echo "$BATCHES" | sed '/^$/d')
-    SELECTED_WAVE=""   # user explicitly chose batches; wave filter irrelevant
+    SELECTED_WAVE=""
 else
-    # ── Wave filtering ─────────────────────────────────────────────
-    # If PRD has batch_wave on any item, filter by wave. Default (no --wave, no
-    # --all-waves) runs the lowest wave that still has incomplete batches.
-    # "Incomplete" = batch has any item with passes:false.
     HAS_WAVES=$(jq '[.items[] | has("batch_wave")] | any' "$PRD_PATH")
 
     if [ "$HAS_WAVES" = "true" ] && [ "$ALL_WAVES" != true ]; then
         if [ -z "$WAVE" ]; then
-            # Auto-detect: lowest wave with any incomplete batch
-            WAVE=$(jq -r '
-                [.items[] | select(.passes != true) | .batch_wave // 1] | min // empty
-            ' "$PRD_PATH")
+            WAVE=$(next_incomplete_wave 0)
             if [ -z "$WAVE" ] || [ "$WAVE" = "null" ]; then
                 log "${GREEN}All waves complete — nothing to do${RESET}"
                 exit 0
@@ -141,7 +142,7 @@ log "Digest: $DIGEST"
 # Arrays live in parent shell — the driver loop uses process substitution
 # (not a pipe) so PIDS+=() mutations persist across iterations.
 declare -a PIDS=()
-declare -a BATCH_LOGS=()  # this-run logs only, used for digest assembly
+declare -a BATCH_LOGS=()
 
 wait_for_slot() {
     while [ "${#PIDS[@]}" -ge "$PARALLEL" ]; do
@@ -230,12 +231,8 @@ done
     echo ""
 } >> "$DIGEST"
 
-# Next-wave banner (only meaningful if we filtered to a specific wave)
 if [ -n "$SELECTED_WAVE" ]; then
-    # Find the next wave that still has any incomplete items (excluding current)
-    NEXT_WAVE=$(jq -r --argjson cur "$SELECTED_WAVE" '
-        [.items[] | select(.passes != true) | (.batch_wave // 1) | select(. > $cur)] | min // empty
-    ' "$PRD_PATH")
+    NEXT_WAVE=$(next_incomplete_wave "$SELECTED_WAVE")
     if [ -n "$NEXT_WAVE" ] && [ "$NEXT_WAVE" != "null" ]; then
         {
             echo ""

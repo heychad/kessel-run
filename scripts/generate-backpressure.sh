@@ -40,9 +40,12 @@ fi
 # ── Detect which checks apply ─────────────────────────────────────
 CHECKS=()
 
+PACKAGE_SCRIPTS=""
+if [ -f package.json ]; then
+    PACKAGE_SCRIPTS=$(jq -r '.scripts // {} | keys[]' package.json 2>/dev/null || true)
+fi
 has_script() {
-    [ -f package.json ] || return 1
-    jq -e --arg s "$1" '.scripts[$s] // empty | select(. != null)' package.json >/dev/null 2>&1
+    printf '%s\n' "$PACKAGE_SCRIPTS" | grep -qx "$1"
 }
 
 # TypeScript
