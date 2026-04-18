@@ -5,3 +5,5 @@
 .kessel-run-stuck
 .kessel-run-state
 logs/
+.entire/
+docs/AUTOSAVE.md
