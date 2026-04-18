@@ -4,10 +4,12 @@
 # writes a morning digest log.
 #
 # Usage:
-#   ./scripts/kessel-run/overnight.sh                   # all batches, parallel N=3
+#   ./scripts/kessel-run/overnight.sh                   # current wave, parallel N=3
+#   ./scripts/kessel-run/overnight.sh --wave 2          # explicit wave
+#   ./scripts/kessel-run/overnight.sh --all-waves       # every wave in one go (only safe if no cross-wave code deps)
 #   ./scripts/kessel-run/overnight.sh --parallel 5      # bump parallelism
 #   ./scripts/kessel-run/overnight.sh --serial          # one at a time
-#   ./scripts/kessel-run/overnight.sh --batches A,C     # only these batches
+#   ./scripts/kessel-run/overnight.sh --batches A,C     # specific batches (overrides --wave)
 #   ./scripts/kessel-run/overnight.sh --dry-run         # print plan only
 set -euo pipefail
 
@@ -15,6 +17,8 @@ KESSEL_DIR="${KESSEL_DIR:-scripts/kessel-run}"
 PRD_PATH="${PRD_PATH:-docs/specs/PRD.json}"
 PARALLEL="${KESSEL_PARALLEL:-3}"
 ONLY_BATCHES=""
+WAVE=""                # explicit wave number, empty = auto (current incomplete wave)
+ALL_WAVES=false
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -24,8 +28,11 @@ while [[ $# -gt 0 ]]; do
         --serial)     PARALLEL=1; shift ;;
         --batches)    ONLY_BATCHES="$2"; shift 2 ;;
         --batches=*)  ONLY_BATCHES="${1#*=}"; shift ;;
+        --wave)       WAVE="$2"; shift 2 ;;
+        --wave=*)     WAVE="${1#*=}"; shift ;;
+        --all-waves)  ALL_WAVES=true; shift ;;
         --dry-run)    DRY_RUN=true; shift ;;
-        -h|--help)    sed -n '2,12p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,13p' "$0"; exit 0 ;;
         *)            echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -63,12 +70,47 @@ if [ -n "$ONLY_BATCHES" ]; then
         fi
     done
     BATCHES=$(echo "$BATCHES" | sed '/^$/d')
+    SELECTED_WAVE=""   # user explicitly chose batches; wave filter irrelevant
 else
-    BATCHES="$ALL_BATCHES"
+    # ── Wave filtering ─────────────────────────────────────────────
+    # If PRD has batch_wave on any item, filter by wave. Default (no --wave, no
+    # --all-waves) runs the lowest wave that still has incomplete batches.
+    # "Incomplete" = batch has any item with passes:false.
+    HAS_WAVES=$(jq '[.items[] | has("batch_wave")] | any' "$PRD_PATH")
+
+    if [ "$HAS_WAVES" = "true" ] && [ "$ALL_WAVES" != true ]; then
+        if [ -z "$WAVE" ]; then
+            # Auto-detect: lowest wave with any incomplete batch
+            WAVE=$(jq -r '
+                [.items[] | select(.passes != true) | .batch_wave // 1] | min // empty
+            ' "$PRD_PATH")
+            if [ -z "$WAVE" ] || [ "$WAVE" = "null" ]; then
+                log "${GREEN}All waves complete — nothing to do${RESET}"
+                exit 0
+            fi
+            log "Auto-selected wave ${BOLD}$WAVE${RESET} (lowest with incomplete batches)"
+        fi
+
+        # Filter ALL_BATCHES to this wave
+        BATCHES=$(jq -r --argjson w "$WAVE" '
+            [.items[] | select((.batch_wave // 1) == $w) | .github_batch] | unique | .[]
+        ' "$PRD_PATH")
+        SELECTED_WAVE="$WAVE"
+
+        [ -z "$BATCHES" ] && die "No batches found for wave $WAVE"
+    else
+        BATCHES="$ALL_BATCHES"
+        SELECTED_WAVE=""
+        [ "$ALL_WAVES" = true ] && log "${YELLOW}--all-waves: running every wave in one go${RESET}"
+    fi
 fi
 
 BATCH_COUNT=$(echo "$BATCHES" | wc -l | tr -d ' ')
-log "Planned: ${BOLD}$BATCH_COUNT${RESET} batch(es), parallelism=${BOLD}$PARALLEL${RESET}"
+if [ -n "$SELECTED_WAVE" ]; then
+    log "Planned: ${BOLD}$BATCH_COUNT${RESET} batch(es) in wave ${BOLD}$SELECTED_WAVE${RESET}, parallelism=${BOLD}$PARALLEL${RESET}"
+else
+    log "Planned: ${BOLD}$BATCH_COUNT${RESET} batch(es), parallelism=${BOLD}$PARALLEL${RESET}"
+fi
 echo "$BATCHES" | while read -r b; do
     count=$(jq --arg b "$b" '[.items[] | select(.github_batch == $b)] | length' "$PRD_PATH")
     issues=$(jq -r --arg b "$b" '[.items[] | select(.github_batch == $b) | .github_issue] | unique | join(",")' "$PRD_PATH")
@@ -187,6 +229,27 @@ done
     echo "- Elapsed: $((ELAPSED / 60))m $((ELAPSED % 60))s"
     echo ""
 } >> "$DIGEST"
+
+# Next-wave banner (only meaningful if we filtered to a specific wave)
+if [ -n "$SELECTED_WAVE" ]; then
+    # Find the next wave that still has any incomplete items (excluding current)
+    NEXT_WAVE=$(jq -r --argjson cur "$SELECTED_WAVE" '
+        [.items[] | select(.passes != true) | (.batch_wave // 1) | select(. > $cur)] | min // empty
+    ' "$PRD_PATH")
+    if [ -n "$NEXT_WAVE" ] && [ "$NEXT_WAVE" != "null" ]; then
+        {
+            echo ""
+            echo "## Next wave"
+            echo ""
+            echo "Wave **$NEXT_WAVE** is ready to run once wave $SELECTED_WAVE PRs are merged."
+            echo ""
+            echo "\`\`\`"
+            echo "./scripts/kessel-run/overnight.sh --wave $NEXT_WAVE"
+            echo "\`\`\`"
+            echo ""
+        } >> "$DIGEST"
+    fi
+fi
 
 # Print digest path big
 printf "\n${GREEN}━━━ OVERNIGHT COMPLETE ━━━${RESET}\n"

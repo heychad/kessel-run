@@ -89,4 +89,11 @@ fi
 if [ "$FAIL_COUNT" -gt 0 ]; then
     printf "  ${DIM}•${RESET} Check failed batch logs in ${CYAN}logs/batch-*.log${RESET}\n"
 fi
+
+# Surface the next-wave prompt if the digest has one
+NEXT_WAVE_CMD=$(grep -oE '\./scripts/kessel-run/overnight\.sh --wave [0-9]+' "$DIGEST" | head -1 || true)
+if [ -n "$NEXT_WAVE_CMD" ]; then
+    printf "  ${DIM}•${RESET} ${YELLOW}After merging today's PRs,${RESET} launch next wave: ${CYAN}%s${RESET}\n" "$NEXT_WAVE_CMD"
+fi
+
 printf "  ${DIM}•${RESET} Full digest:        ${CYAN}less %s${RESET}\n\n" "$DIGEST"
