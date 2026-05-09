@@ -64,7 +64,14 @@ echo "  + scripts/kessel-run/PROMPT.md"
 
 # ── Generate PROGRESS.md ──────────────────────────────────────────
 if [ ! -f docs/PROGRESS.md ]; then
-    cp "$KESSEL_ROOT/templates/PROGRESS.md" docs/PROGRESS.md
+cat > docs/PROGRESS.md << 'PROGRESS_EOF'
+# Progress
+
+Append-only log across loop iterations.
+Each cycle appends — never overwrite previous entries.
+
+---
+PROGRESS_EOF
     echo "  + docs/PROGRESS.md"
 else
     echo "  ~ docs/PROGRESS.md (already exists, skipping)"
