@@ -52,6 +52,7 @@ STUCK_FILE=".kessel-run-stuck"         # persists across parsecs, gitignored
 STATE_FILE=".kessel-run-state"         # crash-resume state
 LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/kessel-run.log"
+KESSEL_HEARTBEAT_SECS="${KESSEL_HEARTBEAT_SECS:-60}"  # 0 = disabled
 
 # ── Cleanup ──────────────────────────────────────────────────────
 cleanup() {
@@ -395,12 +396,37 @@ show_parsec_header() {
 
 start_timer() {
     local parsec=$1 start=$2
+    local last_beat=0
     while true; do
         local now=$(date +%s)
         local elapsed=$((now - start))
         printf '\033]0;Kessel Run — Parsec %d — %s\007' "$parsec" "$(format_duration $elapsed)"
+        if [ "$KESSEL_HEARTBEAT_SECS" -gt 0 ] && [ "$elapsed" -gt 0 ] \
+           && [ $((elapsed - last_beat)) -ge "$KESSEL_HEARTBEAT_SECS" ]; then
+            printf "\n  ${DIM}⏱  parsec %d · %s elapsed${RESET}\n" "$parsec" "$(format_duration $elapsed)"
+            last_beat=$elapsed
+        fi
         sleep 1
     done
+}
+
+# Print newly-passing items (with descriptions) since the parsec started.
+# Args: $1 = comma-separated IDs that were failing before the parsec
+show_newly_passing() {
+    local before_failing="$1"
+    [ -z "$before_failing" ] && return 0
+    BEFORE_FAILING="$before_failing" python3 -c "
+import json, os
+before = [b for b in os.environ.get('BEFORE_FAILING','').split(',') if b]
+with open('docs/specs/PRD.json') as f:
+    data = json.load(f)
+items = data if isinstance(data, list) else data.get('items', [])
+by_id = {str(i.get('id', idx)): i for idx, i in enumerate(items)}
+newly = [(bid, by_id[bid]) for bid in before if bid in by_id and by_id[bid].get('passes')]
+for bid, item in newly:
+    desc = (item.get('description','') or '')[:72]
+    print(f'    \033[38;5;114m✓ #{bid}\033[0m  {desc}')
+" 2>/dev/null
 }
 
 # ── Hero banner (Falcon + figlet starwars) ────────────────────────
@@ -560,6 +586,7 @@ while true; do
     # Read PRD once for the header — reuse for before-snapshot too
     read_prd_progress
     _before_passing=$PRD_PASSING
+    _before_failing_csv="$PRD_FAILING_CSV"
 
     TOTAL_NOW=$(date +%s)
     show_parsec_header "$PARSEC" "$PREV_DURATION" "$((TOTAL_NOW - TOTAL_START))"
@@ -626,6 +653,7 @@ while true; do
     if [ "$_items_passed_this" -gt 0 ]; then
         printf "  ${DIM}── parsec %d done ── %s ── ${GREEN}+%d item(s)${DIM} ── %d remaining ──${RESET}\n" \
             "$PARSEC" "$(format_duration $PREV_DURATION)" "$_items_passed_this" "$_remaining_items"
+        show_newly_passing "$_before_failing_csv"
     else
         printf "  ${DIM}── parsec %d done ── %s ── ${ORANGE}+0 items${DIM} ── %d remaining ──${RESET}\n" \
             "$PARSEC" "$(format_duration $PREV_DURATION)" "$_remaining_items"

@@ -2,7 +2,9 @@ You are one cycle of an autonomous loop. Do 1–3 items, then stop.
 
 1. Read docs/PROGRESS.md — what's been built so far
 2. Read docs/specs/PRD.json — pick 1–3 failing items **from the same spec**. Same spec = shared context = fewer mistakes. Unblock downstream first.
-3. For each item: read the spec, search the codebase, implement fully — no placeholders, no stubs
+3. For each item, in this order:
+   a. **First**, print one line to stdout: `🛠  WORKING ON #<id>: <one-line description>` — this is operator-facing status, do it before any tool calls for the item
+   b. Read the spec, search the codebase, implement fully — no placeholders, no stubs
 4. After all items: run `bash scripts/kessel-run/backpressure.sh` — if it fails, fix and re-run. Max 3 fix attempts total.
 5. If green: update docs/specs/PRD.json (passes: true **only for items whose verification steps you confirmed**), append to docs/PROGRESS.md, commit, output REPORT, STOP
 6. If an item is stuck after 3 fix attempts: do NOT mark it passes:true. Mark it failed in your report, commit what passes.
