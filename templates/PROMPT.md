@@ -16,7 +16,7 @@ If ALL items in docs/specs/PRD.json have passes: true, output `<promise>COMPLETE
 
 ## Report format
 
-After committing, output one report block per item attempted:
+After committing, output one report block per item attempted. The status (PASS or FAIL) at the top means all verification ran — only mark PASS if backpressure is green AND the item's verification steps confirmed.
 
 ```
 ━━━ ITEM #<id> ━━━ <PASS or FAIL>
@@ -29,12 +29,9 @@ FILES
 
 DECISIONS
   - <key choice made and why, one line each>
-
-VERIFY
-  tsc ............ PASS
-  build .......... PASS
-  backpressure ... PASS
 ```
+
+If FAIL, add a one-line `WHY:` after DECISIONS explaining what blocked you.
 
 End with:
 ```

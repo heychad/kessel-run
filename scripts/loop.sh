@@ -379,19 +379,20 @@ show_progress() {
 
 show_parsec_header() {
     local parsec=$1 prev_dur=$2 total_dur=$3
-    local time_now
+    local time_now passing=${PRD_PASSING:-0} total=${PRD_TOTAL:-0}
+    local pct=0
+    [ "$total" -gt 0 ] && pct=$(( passing * 100 / total ))
     time_now=$(date '+%H:%M:%S')
 
     echo ""
     if [ "$parsec" -gt 1 ]; then
-        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}  ${DIM}%s  last ${WHITE}%s${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
-            "$parsec" "$time_now" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
+        printf "  ${YELLOW}━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}·${RESET} ${DIM}%s${RESET} ${YELLOW}·${RESET} ${WHITE}%d/%d${DIM} (%d%%)${RESET} ${YELLOW}·${RESET} ${DIM}last ${WHITE}%s${DIM} · total ${WHITE}%s${RESET} ${YELLOW}━━${RESET}\n" \
+            "$parsec" "$time_now" "$passing" "$total" "$pct" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
     else
-        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}  ${DIM}%s${RESET}\n" "$parsec" "$time_now"
+        printf "  ${YELLOW}━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}·${RESET} ${DIM}%s${RESET} ${YELLOW}·${RESET} ${WHITE}%d/%d${DIM} (%d%%)${RESET} ${YELLOW}━━${RESET}\n" \
+            "$parsec" "$time_now" "$passing" "$total" "$pct"
     fi
-    # Uses PRD_PASSING/PRD_TOTAL already set by caller
     show_progress_from_cache
-    echo ""
 }
 
 start_timer() {
@@ -403,7 +404,7 @@ start_timer() {
         printf '\033]0;Kessel Run — Parsec %d — %s\007' "$parsec" "$(format_duration $elapsed)"
         if [ "$KESSEL_HEARTBEAT_SECS" -gt 0 ] && [ "$elapsed" -gt 0 ] \
            && [ $((elapsed - last_beat)) -ge "$KESSEL_HEARTBEAT_SECS" ]; then
-            printf "\n  ${DIM}⏱  parsec %d · %s elapsed${RESET}\n" "$parsec" "$(format_duration $elapsed)"
+            printf "  ${DIM}⏱  parsec %d · %s${RESET}\n" "$parsec" "$(format_duration $elapsed)"
             last_beat=$elapsed
         fi
         sleep 1
@@ -460,7 +461,10 @@ BANNER
     echo ""
 }
 
-print_hero
+if [ -n "${KESSEL_BANNER:-}" ]; then
+    print_hero
+fi
+
 
 # ── Pre-flight checks ───────────────────────────────────────────
 PREFLIGHT_OK=true
@@ -493,16 +497,10 @@ if [ "$PREFLIGHT_OK" = false ]; then
     exit 1
 fi
 
-printf "  ${GREEN}✓${RESET} ${DIM}Prompt${RESET}       ${WHITE}${KESSEL_DIR}/PROMPT.md${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}PRD${RESET}          ${WHITE}docs/specs/PRD.json${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}Backpressure${RESET} ${WHITE}${KESSEL_DIR}/backpressure.sh${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}Progress${RESET}     ${WHITE}docs/PROGRESS.md${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}Model${RESET}        ${WHITE}${KESSEL_MODEL}${RESET}\n"
+printf "  ${GREEN}✓${RESET} ${WHITE}kessel-run${RESET} ${DIM}·${RESET} ${WHITE}%s${RESET}\n" "$KESSEL_MODEL"
 if [ "$SKIP_STUCK_THRESHOLD" -gt 0 ]; then
-    printf "  ${GREEN}✓${RESET} ${DIM}Skip stuck${RESET}   ${WHITE}%d+ cycles${RESET}\n" "$SKIP_STUCK_THRESHOLD"
+    printf "  ${DIM}skip-stuck: ${WHITE}%d+ cycles${RESET}\n" "$SKIP_STUCK_THRESHOLD"
 fi
-printf "  ${DIM}Tip: tail -f %s for a quiet dashboard${RESET}\n" "$LOG_FILE"
-echo ""
 
 # ── Watch mode ───────────────────────────────────────────────────
 if [ "${1:-}" = "watch" ]; then
@@ -543,15 +541,11 @@ _auto_max=$(( (PRD_TOTAL * 3 + 1) / 2 ))
 [ "$_auto_max" -lt 12 ] && _auto_max=12
 MAX_PARSECS="${1:-${KESSEL_MAX_PARSECS:-${_auto_max}}}"
 
-printf "  ${DIM}Max parsecs:${RESET} ${WHITE}%s${RESET} ${DIM}(auto: ceil(%d × 1.5) = %d; 0 = unlimited)${RESET}\n" \
-    "$MAX_PARSECS" "$PRD_TOTAL" "$_auto_max"
+printf "  ${DIM}%d items · max %s parsecs${RESET}\n" "$PRD_TOTAL" "$MAX_PARSECS"
 
 TOTAL_ITEMS_PASSED_START=$PRD_PASSING
 PREV_PASSING=$PRD_PASSING
 CHECKPOINT_PASSING_PREV=$PRD_PASSING
-
-show_progress_from_cache
-echo ""
 
 # Create log dir once (not per iteration)
 mkdir -p "$LOG_DIR"
