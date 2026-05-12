@@ -62,6 +62,15 @@ fi
 cp "$KESSEL_ROOT/templates/PROMPT.md" scripts/kessel-run/PROMPT.md
 echo "  + scripts/kessel-run/PROMPT.md"
 
+# ── Copy anti-patterns.md (referenced by PROMPT.md + backpressure.sh) ──
+mkdir -p docs
+if [ ! -f docs/anti-patterns.md ] || [ "$FORCE" = true ]; then
+    cp "$KESSEL_ROOT/docs/anti-patterns.md" docs/anti-patterns.md
+    echo "  + docs/anti-patterns.md"
+else
+    echo "  ~ docs/anti-patterns.md (exists, use --force to update)"
+fi
+
 # ── Generate PROGRESS.md ──────────────────────────────────────────
 if [ ! -f docs/PROGRESS.md ]; then
 cat > docs/PROGRESS.md << 'PROGRESS_EOF'
