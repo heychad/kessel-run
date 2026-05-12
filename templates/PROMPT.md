@@ -9,6 +9,7 @@ You are one cycle of an autonomous loop. Do 1–3 items, then stop.
 5. If green: update docs/specs/PRD.json (passes: true **only for items whose verification steps you confirmed**), append to docs/PROGRESS.md, commit, output REPORT, STOP
 6. If an item is stuck after 3 fix attempts: do NOT mark it passes:true. Mark it failed in your report, commit what passes.
 7. If nothing passes: append failure notes to docs/PROGRESS.md, commit, output REPORT, STOP
+8. **Always write `.kessel-run-attempted`** with the IDs of every item you worked on this cycle (passed AND failed), one per line. The loop uses this to track which items were truly attempted vs. just sitting in the backlog. Do this even if the cycle ended in failure or you only attempted one item. **Do NOT `git add` this file** — it's ephemeral loop state, consumed and removed by the loop between parsecs. Use `git add <specific-files>` listing only the work-product files (code, tests, docs, PRD.json, PROGRESS.md).
 
 The loop will re-invoke you with fresh context. Do not keep going after your batch.
 
