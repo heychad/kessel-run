@@ -119,6 +119,7 @@ Every cycle gets a **fresh context window** — no accumulated confusion, no deg
 | `docs/specs/PRD.json` | Work items with steps, verification, `passes` tracking |
 | `docs/specs/*.md` | Ground truth requirements, one per topic |
 | `docs/PROGRESS.md` | Append-only memory across cycles |
+| `docs/anti-patterns.md` | Five bug-hiding test patterns the agent self-checks against before marking items `passes: true` |
 | `.claude/CLAUDE.md` | Project constraints + backpressure hook |
 | `.kessel-env` | Sized defaults — source before running |
 
@@ -280,6 +281,22 @@ bash ~/vibes/tools/kessel-run/scripts/generate-backpressure.sh --stdout   # prev
 Auto-detected: pnpm/npm/yarn/bun, TypeScript, ESLint, Vitest, Jest, Next.js, Convex, Playwright, Cypress, Python (pytest), Rust (cargo test + clippy), Go (build + test).
 
 Add custom checks to the `# ── Custom` section of the generated file — regeneration preserves that section only if you re-edit post-generation; keep a copy if you want durable custom gates.
+
+---
+
+## Anti-pattern guard
+
+Backpressure catches what doesn't compile. It doesn't catch tests that are *wrong shape* — tests that pass while leaving real bugs in production. The 2026-05-11 CareAtlas Drug Interactions sprint shipped a 72-item PRD at 100% test-pass rate, and post-merge review still found 16 real production bugs ([CareAtlas PR #468](https://github.com/care-atlas/care-atlas/pull/468) fixed all of them). Every bug traced to one of five test anti-patterns:
+
+1. **Negative-only tests** that prove the gate fires but not that it's in the right place.
+2. **Mock fixtures** with fields the real API never returns.
+3. **Single-call tests** for stateful features (proved state was *written*, not that state is *read*).
+4. **Tests that mock the unit under test** (the test's mock hides the real codepath under test).
+5. **Framework-default surprises** — DRF `URL_FORMAT_OVERRIDE`, renderer chain rewriting `Content-Type`, etc.
+
+`docs/anti-patterns.md` (copied into every project by `init.sh`) is the durable reference. The agent reads it once per cycle (PROMPT.md "Anti-pattern guard" section) and self-checks each item before marking `passes: true`. `backpressure.sh` runs a soft-fail advisory scan over agent-changed test files and prints warnings — non-blocking by design, since false positives are expected.
+
+Use this doc when writing PRD verification entries during `/plan-sprint` — it's a checklist that turns each item's `verification` block from "is the code written" into "is the code actually right."
 
 ---
 

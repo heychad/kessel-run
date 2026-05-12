@@ -52,6 +52,7 @@ STUCK_FILE=".kessel-run-stuck"         # persists across parsecs, gitignored
 STATE_FILE=".kessel-run-state"         # crash-resume state
 LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/kessel-run.log"
+KESSEL_HEARTBEAT_SECS="${KESSEL_HEARTBEAT_SECS:-60}"  # 0 = disabled
 
 # ── Cleanup ──────────────────────────────────────────────────────
 cleanup() {
@@ -378,29 +379,55 @@ show_progress() {
 
 show_parsec_header() {
     local parsec=$1 prev_dur=$2 total_dur=$3
-    local time_now
+    local time_now passing=${PRD_PASSING:-0} total=${PRD_TOTAL:-0}
+    local pct=0
+    [ "$total" -gt 0 ] && pct=$(( passing * 100 / total ))
     time_now=$(date '+%H:%M:%S')
 
     echo ""
     if [ "$parsec" -gt 1 ]; then
-        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}  ${DIM}%s  last ${WHITE}%s${RESET}  ${DIM}total ${WHITE}%s${RESET}\n" \
-            "$parsec" "$time_now" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
+        printf "  ${YELLOW}━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}·${RESET} ${DIM}%s${RESET} ${YELLOW}·${RESET} ${WHITE}%d/%d${DIM} (%d%%)${RESET} ${YELLOW}·${RESET} ${DIM}last ${WHITE}%s${DIM} · total ${WHITE}%s${RESET} ${YELLOW}━━${RESET}\n" \
+            "$parsec" "$time_now" "$passing" "$total" "$pct" "$(format_duration $prev_dur)" "$(format_duration $total_dur)"
     else
-        printf "  ${YELLOW}━━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}━━━${RESET}  ${DIM}%s${RESET}\n" "$parsec" "$time_now"
+        printf "  ${YELLOW}━━ ${WHITE}${BOLD}PARSEC %d${RESET} ${YELLOW}·${RESET} ${DIM}%s${RESET} ${YELLOW}·${RESET} ${WHITE}%d/%d${DIM} (%d%%)${RESET} ${YELLOW}━━${RESET}\n" \
+            "$parsec" "$time_now" "$passing" "$total" "$pct"
     fi
-    # Uses PRD_PASSING/PRD_TOTAL already set by caller
     show_progress_from_cache
-    echo ""
 }
 
 start_timer() {
     local parsec=$1 start=$2
+    local last_beat=0
     while true; do
         local now=$(date +%s)
         local elapsed=$((now - start))
         printf '\033]0;Kessel Run — Parsec %d — %s\007' "$parsec" "$(format_duration $elapsed)"
+        if [ "$KESSEL_HEARTBEAT_SECS" -gt 0 ] && [ "$elapsed" -gt 0 ] \
+           && [ $((elapsed - last_beat)) -ge "$KESSEL_HEARTBEAT_SECS" ]; then
+            printf "  ${DIM}⏱  parsec %d · %s${RESET}\n" "$parsec" "$(format_duration $elapsed)"
+            last_beat=$elapsed
+        fi
         sleep 1
     done
+}
+
+# Print newly-passing items (with descriptions) since the parsec started.
+# Args: $1 = comma-separated IDs that were failing before the parsec
+show_newly_passing() {
+    local before_failing="$1"
+    [ -z "$before_failing" ] && return 0
+    BEFORE_FAILING="$before_failing" python3 -c "
+import json, os
+before = [b for b in os.environ.get('BEFORE_FAILING','').split(',') if b]
+with open('docs/specs/PRD.json') as f:
+    data = json.load(f)
+items = data if isinstance(data, list) else data.get('items', [])
+by_id = {str(i.get('id', idx)): i for idx, i in enumerate(items)}
+newly = [(bid, by_id[bid]) for bid in before if bid in by_id and by_id[bid].get('passes')]
+for bid, item in newly:
+    desc = (item.get('description','') or '')[:72]
+    print(f'    \033[38;5;114m✓ #{bid}\033[0m  {desc}')
+" 2>/dev/null
 }
 
 # ── Hero banner (Falcon + figlet starwars) ────────────────────────
@@ -434,7 +461,10 @@ BANNER
     echo ""
 }
 
-print_hero
+if [ -n "${KESSEL_BANNER:-}" ]; then
+    print_hero
+fi
+
 
 # ── Pre-flight checks ───────────────────────────────────────────
 PREFLIGHT_OK=true
@@ -467,16 +497,10 @@ if [ "$PREFLIGHT_OK" = false ]; then
     exit 1
 fi
 
-printf "  ${GREEN}✓${RESET} ${DIM}Prompt${RESET}       ${WHITE}${KESSEL_DIR}/PROMPT.md${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}PRD${RESET}          ${WHITE}docs/specs/PRD.json${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}Backpressure${RESET} ${WHITE}${KESSEL_DIR}/backpressure.sh${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}Progress${RESET}     ${WHITE}docs/PROGRESS.md${RESET}\n"
-printf "  ${GREEN}✓${RESET} ${DIM}Model${RESET}        ${WHITE}${KESSEL_MODEL}${RESET}\n"
+printf "  ${GREEN}✓${RESET} ${WHITE}kessel-run${RESET} ${DIM}·${RESET} ${WHITE}%s${RESET}\n" "$KESSEL_MODEL"
 if [ "$SKIP_STUCK_THRESHOLD" -gt 0 ]; then
-    printf "  ${GREEN}✓${RESET} ${DIM}Skip stuck${RESET}   ${WHITE}%d+ cycles${RESET}\n" "$SKIP_STUCK_THRESHOLD"
+    printf "  ${DIM}skip-stuck: ${WHITE}%d+ cycles${RESET}\n" "$SKIP_STUCK_THRESHOLD"
 fi
-printf "  ${DIM}Tip: tail -f %s for a quiet dashboard${RESET}\n" "$LOG_FILE"
-echo ""
 
 # ── Watch mode ───────────────────────────────────────────────────
 if [ "${1:-}" = "watch" ]; then
@@ -517,15 +541,11 @@ _auto_max=$(( (PRD_TOTAL * 3 + 1) / 2 ))
 [ "$_auto_max" -lt 12 ] && _auto_max=12
 MAX_PARSECS="${1:-${KESSEL_MAX_PARSECS:-${_auto_max}}}"
 
-printf "  ${DIM}Max parsecs:${RESET} ${WHITE}%s${RESET} ${DIM}(auto: ceil(%d × 1.5) = %d; 0 = unlimited)${RESET}\n" \
-    "$MAX_PARSECS" "$PRD_TOTAL" "$_auto_max"
+printf "  ${DIM}%d items · max %s parsecs${RESET}\n" "$PRD_TOTAL" "$MAX_PARSECS"
 
 TOTAL_ITEMS_PASSED_START=$PRD_PASSING
 PREV_PASSING=$PRD_PASSING
 CHECKPOINT_PASSING_PREV=$PRD_PASSING
-
-show_progress_from_cache
-echo ""
 
 # Create log dir once (not per iteration)
 mkdir -p "$LOG_DIR"
@@ -560,6 +580,7 @@ while true; do
     # Read PRD once for the header — reuse for before-snapshot too
     read_prd_progress
     _before_passing=$PRD_PASSING
+    _before_failing_csv="$PRD_FAILING_CSV"
 
     TOTAL_NOW=$(date +%s)
     show_parsec_header "$PARSEC" "$PREV_DURATION" "$((TOTAL_NOW - TOTAL_START))"
@@ -626,6 +647,7 @@ while true; do
     if [ "$_items_passed_this" -gt 0 ]; then
         printf "  ${DIM}── parsec %d done ── %s ── ${GREEN}+%d item(s)${DIM} ── %d remaining ──${RESET}\n" \
             "$PARSEC" "$(format_duration $PREV_DURATION)" "$_items_passed_this" "$_remaining_items"
+        show_newly_passing "$_before_failing_csv"
     else
         printf "  ${DIM}── parsec %d done ── %s ── ${ORANGE}+0 items${DIM} ── %d remaining ──${RESET}\n" \
             "$PARSEC" "$(format_duration $PREV_DURATION)" "$_remaining_items"
