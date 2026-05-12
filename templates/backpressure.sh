@@ -10,13 +10,34 @@ check() {
   EXIT_CODE=1
 }
 
+# Wraps a test runner so that "0 tests discovered" counts as failure.
+# Many test runners (Django, pytest with no tests, Jest) exit 0 when they find
+# no tests — which makes an empty test suite look green. Use this for any
+# test command where you want to guarantee tests actually exist.
+check_tests() {
+  local name="$1"; shift
+  local output rc
+  output=$("$@" 2>&1) && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    FAILURES+=$'\n'"--- FAIL: $name ---"$'\n'"$(echo "$output" | head -30)"$'\n'
+    EXIT_CODE=1
+    return
+  fi
+  # Pattern catches Django's "Found 0 test(s)", pytest's "no tests ran", and
+  # Jest's "No tests found." Adjust if a new runner is added with different phrasing.
+  if echo "$output" | grep -qE "(Found 0 test|no tests ran|No tests found|0 passing)"; then
+    FAILURES+=$'\n'"--- FAIL: $name-empty ---"$'\nNo tests discovered. Add tests for the code you wrote — runners return exit 0 on zero tests, which would otherwise hide every regression.\n'
+    EXIT_CODE=1
+  fi
+}
+
 # ── Static checks (auto-detect based on config files) ───────────
 [ -f tsconfig.json ]     && check "tsc" npx tsc --noEmit
 [ -f eslint.config.mjs ] || [ -f .eslintrc.json ] && check "eslint" npx eslint . --max-warnings 0
-[ -f vitest.config.ts ]  || [ -f vitest.config.mts ] && check "vitest" npx vitest run
-[ -f jest.config.js ]    || [ -f jest.config.ts ] && check "jest" npx jest
+[ -f vitest.config.ts ]  || [ -f vitest.config.mts ] && check_tests "vitest" npx vitest run
+[ -f jest.config.js ]    || [ -f jest.config.ts ] && check_tests "jest" npx jest
 [ -f next.config.ts ]    || [ -f next.config.mjs ] && check "next-build" npx next build
-[ -f pyproject.toml ]    && check "pytest" python -m pytest
+[ -f pyproject.toml ]    && check_tests "pytest" python -m pytest
 [ -f Cargo.toml ]        && check "cargo" cargo test
 [ -d convex ]            && check "convex" npx convex typecheck
 
@@ -31,10 +52,11 @@ check() {
 # green test suites. Each detector is heuristic — false positives are
 # expected. The signal is "look here," not "block here."
 #
-# Scoped to test files changed by the agent vs origin/main (or HEAD~3
-# fallback) so we don't flag legacy code. Silent when no test files changed.
+# Scoped to test files changed by the agent in this loop (HEAD vs HEAD~3)
+# so we don't flag legacy code. Silent when no test files changed.
 check_anti_patterns() {
   command -v git >/dev/null 2>&1 || return 0
+  # Diff against the merge-base with origin/main if available, else last 3 commits.
   local base
   base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD~3 2>/dev/null || echo "")
   [ -z "$base" ] && return 0
@@ -46,7 +68,7 @@ check_anti_patterns() {
   local warnings=""
   while IFS= read -r f; do
     [ -f "$f" ] || continue
-    # 1. Negative-only test files (>= 3 tests, >=70% negative names).
+    # 1. Negative-only test files (>= 3 tests, >70% negative names).
     local total neg
     total=$(grep -cE '^\s*(def test_|test\(|it\()' "$f" 2>/dev/null || echo 0)
     neg=$(grep -cE '(denied|forbidden|unauthorized|not_allowed|rejects|invalid|returns_4[0-9]{2}|_404|_403|_401|_400)' "$f" 2>/dev/null || echo 0)
@@ -55,11 +77,17 @@ check_anti_patterns() {
     fi
     # 3. Stateful keywords without two-invocation pattern.
     if grep -qE '(cursor|resume|checkpoint|retry|idempotent|dedup|pagination|next_page)' "$f" 2>/dev/null; then
+      # Count distinct call-site invocations of the function-under-test
+      # heuristic: if a test mentions a stateful keyword but the test body
+      # never repeats a function call, that's suspicious.
       if ! grep -qE '(twice|second_call|second invocation|call.*again|second_run|resumes_from|reads.*cursor)' "$f" 2>/dev/null; then
         warnings+=$'\n  ⚠ '"$f"" — stateful keyword present but no two-invocation pattern detected. Add a test that invokes twice and asserts the second call respects state from the first. See docs/anti-patterns.md #3."
       fi
     fi
     # 4a. No-leak / audit / redaction tests that patch the unit under test.
+    # If the file name says "no_phi" / "redact" / "audit_log" / "leak" /
+    # "no_secret" AND the file uses `patch(`, the test is almost certainly
+    # mocking away the codepath it claims to verify.
     if echo "$f" | grep -qiE '(no_phi|no_secret|redact|audit_log|sanitiz|leak)' && \
        grep -qE "patch\(" "$f" 2>/dev/null; then
       warnings+=$'\n  ⚠ '"$f"" — no-leak / audit test patches the unit under test. Drive real data through the un-mocked unit and assert on captured logs (caplog / assertLogs). See docs/anti-patterns.md #4."

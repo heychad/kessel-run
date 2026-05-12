@@ -49,6 +49,7 @@ ORANGE='\033[38;5;208m'
 # ── Constants ──────────────────────────────────────────────────
 STUCK_WARN_THRESHOLD="${KESSEL_STUCK_THRESHOLD:-3}"  # warn after N consecutive failures
 STUCK_FILE=".kessel-run-stuck"         # persists across parsecs, gitignored
+ATTEMPTED_FILE=".kessel-run-attempted" # written by the per-cycle agent; consumed and removed each parsec
 STATE_FILE=".kessel-run-state"         # crash-resume state
 LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/kessel-run.log"
@@ -123,9 +124,18 @@ print(f'{passing} {total} {chr(44).join(failing_ids)}')
 
 # Update .kessel-run-stuck with current failing IDs.
 # File format: one "ID COUNT" per line.
+#
+# Stuck-counter semantics: an item is "stuck" if the agent attempted it in a parsec
+# and it still didn't pass. Items that are simply waiting in the backlog (passes:false
+# but never picked) do NOT accumulate stuck counts — otherwise long sprints would skip
+# items prematurely as their "stuck count" climbed without ever being touched.
+#
+# The per-cycle agent writes attempted IDs to .kessel-run-attempted (see PROMPT.md
+# step 8). We only increment counts for IDs in BOTH attempted AND failing.
 update_stuck_file() {
     local failing_csv="$1"   # comma-separated currently-failing IDs (may be empty)
 
+    # Load previous stuck counts (preserved across parsecs for items not attempted this cycle).
     declare -A counts
     if [ -f "$STUCK_FILE" ]; then
         while read -r id cnt; do
@@ -133,6 +143,7 @@ update_stuck_file() {
         done < "$STUCK_FILE"
     fi
 
+    # Build set of currently-failing items from PRD.
     declare -A currently_failing
     if [ -n "$failing_csv" ]; then
         IFS=',' read -ra fids <<< "$failing_csv"
@@ -141,17 +152,41 @@ update_stuck_file() {
         done
     fi
 
+    # Build set of items the agent actually attempted this parsec.
+    declare -A attempted
+    local have_attempted_file=0
+    if [ -f "$ATTEMPTED_FILE" ]; then
+        have_attempted_file=1
+        while read -r id; do
+            [ -n "$id" ] && attempted["$id"]=1
+        done < "$ATTEMPTED_FILE"
+    else
+        # Agent didn't write the file. Warn loudly — without it the stuck logic can't
+        # distinguish "attempted-and-failed" from "still in backlog." We refuse to
+        # increment counters in this state to avoid the death-spiral bug.
+        printf "${ORANGE}⚠ no .kessel-run-attempted written this parsec — stuck counter frozen this cycle${RESET}\n" >&2
+    fi
+
     declare -A new_counts
+    # Carry forward counts for items NOT attempted this parsec (still failing, but untouched).
     for id in "${!counts[@]}"; do
-        if [ -n "${currently_failing[$id]:-}" ]; then
-            new_counts["$id"]=$(( counts[$id] + 1 ))
+        if [ -z "${attempted[$id]:-}" ] && [ -n "${currently_failing[$id]:-}" ]; then
+            new_counts["$id"]=${counts[$id]}
         fi
     done
-    for id in "${!currently_failing[@]}"; do
-        if [ -z "${counts[$id]:-}" ]; then
-            new_counts["$id"]=1
-        fi
-    done
+
+    # For items attempted this parsec:
+    #   - if still failing → increment counter (genuine stuck)
+    #   - if now passing   → drop from stuck file (counter resets to 0)
+    if [ "$have_attempted_file" -eq 1 ]; then
+        for id in "${!attempted[@]}"; do
+            if [ -n "${currently_failing[$id]:-}" ]; then
+                new_counts["$id"]=$(( ${counts[$id]:-0} + 1 ))
+            fi
+        done
+        # Consume the file so next parsec starts fresh.
+        rm -f "$ATTEMPTED_FILE"
+    fi
 
     : > "$STUCK_FILE"
     for id in "${!new_counts[@]}"; do

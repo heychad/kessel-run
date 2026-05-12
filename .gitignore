@@ -4,6 +4,7 @@
 *~
 .kessel-run-stuck
 .kessel-run-state
+.kessel-run-attempted
 logs/
 .entire/
 docs/AUTOSAVE.md
